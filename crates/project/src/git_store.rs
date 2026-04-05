@@ -4913,6 +4913,40 @@ impl Repository {
         })
     }
 
+    pub fn file_history_shas(
+        &mut self,
+        repo_path: RepoPath,
+        limit: Option<usize>,
+    ) -> oneshot::Receiver<Result<Vec<Oid>>> {
+        self.send_job(None, move |git_repo, _| async move {
+            match git_repo {
+                RepositoryState::Local(LocalRepositoryState { backend, .. }) => {
+                    let (request_tx, request_rx) =
+                        async_channel::unbounded::<Vec<Arc<InitialGraphCommitData>>>();
+                    backend
+                        .initial_graph_data(
+                            LogSource::File(repo_path),
+                            LogOrder::DateOrder,
+                            request_tx,
+                        )
+                        .await?;
+
+                    let mut shas = Vec::new();
+                    while let Ok(commits) = request_rx.try_recv() {
+                        for commit in commits {
+                            shas.push(commit.sha);
+                            if limit.is_some_and(|limit| shas.len() >= limit) {
+                                return Ok(shas);
+                            }
+                        }
+                    }
+                    Ok(shas)
+                }
+                RepositoryState::Remote(_) => Ok(Vec::new()),
+            }
+        })
+    }
+
     pub fn get_graph_data(
         &self,
         log_source: LogSource,
@@ -7523,6 +7557,41 @@ impl Repository {
                 RepositoryState::Remote(_) => Ok(None),
             }
         })
+    }
+
+    pub fn head_and_index_text(
+        &mut self,
+        buffer_id: BufferId,
+        repo_path: RepoPath,
+        cx: &App,
+    ) -> Task<Result<(Option<String>, Option<String>)>> {
+        let rx = self.send_job(None, move |state, _| async move {
+            match state {
+                RepositoryState::Local(LocalRepositoryState { backend, .. }) => {
+                    let head_text = backend.load_committed_text(repo_path.clone()).await;
+                    let index_text = backend.load_index_text(repo_path).await;
+                    anyhow::Ok((head_text, index_text))
+                }
+                RepositoryState::Remote(RemoteRepositoryState { project_id, client }) => {
+                    use proto::open_uncommitted_diff_response::Mode;
+                    let response = client
+                        .request(proto::OpenUncommittedDiff {
+                            project_id: project_id.to_proto(),
+                            buffer_id: buffer_id.to_proto(),
+                        })
+                        .await?;
+                    let mode = Mode::from_i32(response.mode).context("Invalid mode")?;
+                    let (head_text, index_text) = match mode {
+                        Mode::IndexMatchesHead => {
+                            (response.committed_text.clone(), response.committed_text)
+                        }
+                        Mode::IndexAndHead => (response.committed_text, response.staged_text),
+                    };
+                    Ok((head_text, index_text))
+                }
+            }
+        });
+        cx.spawn(|_: &mut AsyncApp| async move { rx.await? })
     }
 
     fn load_blob_content(&mut self, oid: Oid, cx: &App) -> Task<Result<String>> {
