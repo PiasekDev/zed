@@ -18,6 +18,7 @@ use anyhow::Result;
 use collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use futures::{StreamExt, stream::FuturesUnordered};
 use git::{CopyFilePermalink, OpenFilePermalink};
+use gpui::ScrollWheelEvent;
 use gpui::{
     Action, Anchor, AnyElement, App, AsyncWindowContext, ClickEvent, ClipboardItem, Context, Div,
     DragMoveEvent, Entity, EntityId, EventEmitter, ExternalPaths, FocusHandle, FocusOutEvent,
@@ -1558,6 +1559,49 @@ impl Pane {
         self.activate_item(index, true, true, window, cx);
     }
 
+    fn handle_tab_bar_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let should_switch_tabs =
+            TabBarSettings::get_global(cx).scroll_to_switch_tabs != event.modifiers.shift;
+
+        if !should_switch_tabs {
+            self.suppress_scroll = true;
+            return;
+        }
+
+        enum TabBarScrollDirection {
+            Previous,
+            Next,
+        }
+
+        let vertical_delta = event.delta.pixel_delta(window.line_height()).y;
+        let direction = match vertical_delta.cmp(&Pixels::ZERO) {
+            cmp::Ordering::Greater => TabBarScrollDirection::Previous,
+            cmp::Ordering::Less => TabBarScrollDirection::Next,
+            cmp::Ordering::Equal => return,
+        };
+
+        cx.stop_propagation();
+
+        match direction {
+            TabBarScrollDirection::Previous => {
+                if self.active_item_index > 0 {
+                    self.activate_item(self.active_item_index - 1, true, true, window, cx);
+                }
+            }
+            TabBarScrollDirection::Next => {
+                let next_index = self.active_item_index + 1;
+                if next_index < self.items.len() {
+                    self.activate_item(next_index, true, true, window, cx);
+                }
+            }
+        }
+    }
+
     pub fn swap_item_left(
         &mut self,
         _: &SwapItemLeft,
@@ -2918,6 +2962,7 @@ impl Pane {
                 ClosePosition::Right => ui::TabCloseSide::End,
             })
             .toggle_state(is_active)
+            .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
             .on_click(cx.listener({
                 let item_handle = item.boxed_clone();
                 move |pane: &mut Self, event: &ClickEvent, window, cx| {
@@ -3624,6 +3669,7 @@ impl Pane {
                 let is_scrollable = max_scroll > px(2.0);
                 let has_active_unpinned_tab = self.active_item_index >= self.pinned_tab_count;
                 h_flex()
+                    .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
                     .children(pinned_tabs)
                     .when(is_scrollable && is_scrolled, |this| {
                         this.when(has_active_unpinned_tab, |this| this.border_r_2())
@@ -3687,9 +3733,6 @@ impl Pane {
             .overflow_x_scroll()
             .w_full()
             .track_scroll(&self.tab_bar_scroll_handle)
-            .on_scroll_wheel(cx.listener(|this, _, _, _| {
-                this.suppress_scroll = true;
-            }))
             .children(unpinned_tabs)
             .child(self.render_tab_bar_drop_target(tab_count, cx))
     }
@@ -3704,6 +3747,7 @@ impl Pane {
             .min_w_6()
             .h(Tab::container_height(cx))
             .flex_grow_1()
+            .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
             // HACK: This empty child is currently necessary to force the drop target to appear
             // despite us setting a min width above.
             .child("")
@@ -3750,6 +3794,7 @@ impl Pane {
             .flex_grow_1()
             .border_l_1()
             .border_color(cx.theme().colors().border)
+            .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
             // HACK: This empty child is currently necessary to force the drop target to appear
             // despite us setting a min width above.
             .child("")
@@ -5089,7 +5134,7 @@ mod tests {
     };
     use gpui::{
         AppContext, Axis, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-        TestAppContext, VisualTestContext, size,
+        ScrollDelta, TestAppContext, TouchPhase, VisualTestContext, point, size,
     };
     use project::FakeFs;
     use settings::SettingsStore;
@@ -8595,6 +8640,187 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn test_scroll_wheel_over_tab_bar_switches_tabs_when_enabled(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        set_scroll_to_switch_tabs(cx, true);
+
+        add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        add_labeled_item(&pane, "C", false, cx);
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+
+        let tab_c_bounds = cx.debug_bounds("TAB-2").expect("tab C should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_c_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B*", "C"], cx);
+
+        let tab_b_bounds = cx.debug_bounds("TAB-1").expect("tab B should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_b_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., -3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+    }
+
+    #[gpui::test]
+    async fn test_scroll_wheel_over_tab_bar_does_not_wrap(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        set_scroll_to_switch_tabs(cx, true);
+
+        add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        assert_item_labels(&pane, ["A", "B*"], cx);
+
+        let tab_b_bounds = cx.debug_bounds("TAB-1").expect("tab B should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_b_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., -3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B*"], cx);
+
+        pane.update_in(cx, |pane, window, cx| {
+            pane.activate_item(0, true, true, window, cx);
+        });
+        assert_item_labels(&pane, ["A*", "B"], cx);
+
+        let tab_a_bounds = cx.debug_bounds("TAB-0").expect("tab A should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_a_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A*", "B"], cx);
+    }
+
+    #[gpui::test]
+    async fn test_horizontal_scroll_over_tab_bar_does_not_switch_tabs(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        set_scroll_to_switch_tabs(cx, true);
+
+        add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        add_labeled_item(&pane, "C", false, cx);
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+
+        let tab_c_bounds = cx.debug_bounds("TAB-2").expect("tab C should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_c_bounds.center(),
+            delta: ScrollDelta::Lines(point(3., 0.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+    }
+
+    #[gpui::test]
+    async fn test_shift_inverts_scroll_wheel_tab_switching(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        add_labeled_item(&pane, "C", false, cx);
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+
+        let tab_c_bounds = cx.debug_bounds("TAB-2").expect("tab C should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_c_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B*", "C"], cx);
+
+        set_scroll_to_switch_tabs(cx, true);
+
+        let tab_b_bounds = cx.debug_bounds("TAB-1").expect("tab B should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_b_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B*", "C"], cx);
+    }
+
+    #[gpui::test]
+    async fn test_scroll_wheel_over_separate_pinned_tab_row_switches_tabs(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        set_scroll_to_switch_tabs(cx, true);
+        set_pinned_tabs_separate_row(cx, true);
+
+        let item_a = add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        add_labeled_item(&pane, "C", false, cx);
+        pane.update_in(cx, |pane, window, cx| {
+            let index = pane
+                .index_for_item_id(item_a.item_id())
+                .expect("pinned item should be in pane");
+            pane.pin_tab_at(index, window, cx);
+        });
+        assert_item_labels(&pane, ["A!", "B", "C*"], cx);
+
+        let pinned_tab_bounds = cx
+            .debug_bounds("TAB-0")
+            .expect("pinned tab should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: pinned_tab_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A!", "B*", "C"], cx);
+    }
+
+    #[gpui::test]
     async fn test_close_all_items_including_pinned(cx: &mut TestAppContext) {
         init_test(cx);
         let fs = FakeFs::new(cx.executor());
@@ -9070,6 +9296,17 @@ mod tests {
                     .tab_bar
                     .get_or_insert_default()
                     .show_pinned_tabs_in_separate_row = Some(enabled);
+            });
+        });
+    }
+
+    fn set_scroll_to_switch_tabs(cx: &mut TestAppContext, enabled: bool) {
+        cx.update_global(|store: &mut SettingsStore, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings
+                    .tab_bar
+                    .get_or_insert_default()
+                    .scroll_to_switch_tabs = Some(enabled);
             });
         });
     }
