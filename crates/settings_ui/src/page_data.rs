@@ -4571,7 +4571,7 @@ fn window_and_layout_page() -> SettingsPage {
         ]
     }
 
-    fn tab_bar_section() -> [SettingsPageItem; 9] {
+    fn tab_bar_section() -> [SettingsPageItem; 10] {
         [
             SettingsPageItem::SectionHeader("Tab Bar"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -4715,6 +4715,28 @@ fn window_and_layout_page() -> SettingsPage {
                             .tab_bar
                             .get_or_insert_default()
                             .show_pinned_tabs_in_separate_row = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Scroll To Switch Tabs",
+                description: "Switch tabs when scrolling vertically over the tab bar.",
+                field: Box::new(SettingField {
+                    json_path: Some("tab_bar.scroll_to_switch_tabs"),
+                    pick: |settings_content| {
+                        settings_content
+                            .tab_bar
+                            .as_ref()?
+                            .scroll_to_switch_tabs
+                            .as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .tab_bar
+                            .get_or_insert_default()
+                            .scroll_to_switch_tabs = value;
                     },
                 }),
                 metadata: None,
