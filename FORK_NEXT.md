@@ -1,0 +1,144 @@
+# Zed Next Fork Workflow
+
+This repository is a personal downstream build of Zed. The goal is to keep a
+small infrastructure branch on top of upstream `main`, then build the daily
+driver `next` branch by merging selected personal patch branches and selected
+upstream pull requests.
+
+## Branches
+
+- `upstream/main`: read-only remote from `zed-industries/zed`.
+- `origin/main`: optional mirror of upstream `main` in `PiasekDev/zed`.
+- `next-base`: fork infrastructure only. This contains packaging, release, and
+  local build support. It should not contain editor behavior patches.
+- `next`: daily-driver branch. Start from `next-base`, then merge custom patch
+  branches and selected upstream PR branches.
+- Custom patch branches: named directly, for example `scroll-to-switch-tabs`.
+  Keep these rebaseable on top of `upstream/main`.
+- Upstream PR branches: use `pr/<number>-<short-name>`.
+
+## Updating From Upstream
+
+Fetch upstream first:
+
+```sh
+git fetch upstream --prune
+git fetch origin --prune
+```
+
+Rebase custom patch branches:
+
+```sh
+git switch scroll-to-switch-tabs
+git rebase upstream/main
+```
+
+Rebase the infrastructure branch:
+
+```sh
+git switch next-base
+git rebase upstream/main
+```
+
+Rebuild `next` from the infrastructure branch:
+
+```sh
+git switch -C next next-base
+git merge --no-ff scroll-to-switch-tabs -m "Merge scroll-to-switch-tabs into next"
+```
+
+Then merge any selected upstream PR branches:
+
+```sh
+git fetch upstream pull/<number>/head:pr/<number>-<short-name>
+git merge --no-ff pr/<number>-<short-name> -m "Merge upstream PR <number> into next"
+```
+
+Use merge commits for upstream PRs so they are easy to revert or replace. Use
+rebases for personal patch branches so each long-lived personal change remains
+small and readable.
+
+## Publishing
+
+Do not push `next` until it contains all intended patches and PR branches for
+that build. A push to `next` starts the GitHub Actions build.
+
+When ready:
+
+```sh
+git push origin next-base
+git push --force-with-lease origin next
+```
+
+`next-base` does not trigger the build workflow. `next` does.
+
+## Build Outputs
+
+GitHub Actions publishes a moving prerelease named `zed-next` containing:
+
+- `zed-linux-x86_64.tar.gz`
+- `zed-remote-server-linux-x86_64.gz`
+- `zed-next-SHA256SUMS.txt`
+- `zed-next-version`
+
+The binary Arch package reads `zed-next-version` so the package version follows
+the Zed crate version and commit SHA instead of hard-coding a Zed version.
+
+## Installing
+
+Install the GitHub-built binary package:
+
+```sh
+cd packaging/arch/zed-next-bin
+makepkg -Csi
+```
+
+Build and install from this checkout while reusing the local `target` directory:
+
+```sh
+script/package-zed-next-local
+```
+
+Package an already-built local bundle:
+
+```sh
+script/package-zed-next-local --no-build
+```
+
+Clean source-build package:
+
+```sh
+cd packaging/arch/zed-next-git
+makepkg -Csi
+```
+
+## Local Build Notes
+
+`script/package-zed-next-local` temporarily writes `stable` to
+`crates/zed/RELEASE_CHANNEL`, builds the Linux bundle, restores the previous
+file contents, and packages the tarball through `makepkg`.
+
+The local and source-build packages add `-C target-cpu=native` by default. To
+disable that:
+
+```sh
+ZED_NEXT_TARGET_CPU= script/package-zed-next-local
+ZED_NEXT_TARGET_CPU= makepkg -Csi
+```
+
+All replacement builds set `ZED_UPDATE_EXPLANATION`, which disables upstream
+auto-update and points updates back to this fork/package flow.
+
+## Agent Checklist
+
+When asked to update this fork:
+
+1. Read this file.
+2. Fetch `upstream` and `origin`.
+3. Rebase `next-base` on `upstream/main`.
+4. Rebase personal patch branches on `upstream/main`.
+5. Recreate `next` from `next-base`.
+6. Merge personal patch branches.
+7. Fetch and merge any requested upstream PR branches as `pr/<number>-<name>`.
+8. Validate package metadata with `makepkg --printsrcinfo` for packages touched.
+9. Do not push `next` until the requested PR set is complete.
