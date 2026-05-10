@@ -15,6 +15,7 @@ Start from `next-base`, then merge entries in this order:
 git switch -C next next-base
 git merge --no-ff scroll-to-switch-tabs -m "Merge scroll-to-switch-tabs into next"
 git merge --no-ff integration/46478-search-modal -m "Merge search modal integration into next"
+git merge --no-ff integration/55404-detachable-items -m "Merge detachable item integration into next"
 ```
 
 After merging any requested upstream PR snapshots, push only when the intended
@@ -51,6 +52,7 @@ rebases on `next-base`.
 | Branch | Raw Source Branch | Upstream PR | Upstream Author | Snapshot Commit | Purpose | Merge Command |
 | --- | --- | --- | --- | --- | --- | --- |
 | `integration/46478-search-modal` | `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Adds a search modal for project-wide text search. | `git merge --no-ff integration/46478-search-modal -m "Merge search modal integration into next"` |
+| `integration/55404-detachable-items` | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Adds detachable editor items, with local drag-out/reattach behavior and maximized detached windows. | `git merge --no-ff integration/55404-detachable-items -m "Merge detachable item integration into next"` |
 
 ### Integration Branch Maintenance
 
@@ -60,6 +62,10 @@ Rebase adapted integration branches on `next-base` before rebuilding `next`:
 git switch integration/46478-search-modal
 git rebase next-base
 git push --force-with-lease origin integration/46478-search-modal
+
+git switch integration/55404-detachable-items
+git rebase next-base
+git push --force-with-lease origin integration/55404-detachable-items
 ```
 
 When creating a new adapted integration branch:
@@ -87,6 +93,7 @@ Snapshot: <raw-pr-head-sha>
 | Branch | Upstream PR | Upstream Author | Snapshot Commit | Purpose | Merge Command |
 | --- | --- | --- | --- | --- | --- |
 | `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Raw upstream source snapshot for `integration/46478-search-modal`. | Do not merge directly into `next`; merge the adapted `integration/46478-search-modal` branch. |
+| `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Raw upstream source snapshot for `integration/55404-detachable-items`. | Do not merge directly into `next`; merge the adapted `integration/55404-detachable-items` branch. |
 
 ### PR #46478 Integration Notes
 
@@ -103,6 +110,34 @@ After changing the integration branch, run:
 
 ```sh
 cargo check -p search
+```
+
+### PR #55404 Integration Notes
+
+This PR needs an adapted branch for conflict resolution against current
+`next-base` and local behavior changes:
+
+- Resolve `crates/editor/src/editor.rs` by keeping the current editor state and
+  adding the PR's window activation subscription for moved editor items.
+- Rename the action from moving the active item to a new window to
+  `DetachActiveItem`, with user-facing text `Detach Item`.
+- Add tab drag-out behavior that detaches a tab into a maximized window.
+- Add drag-back behavior for detached windows. When the compositor does not
+  expose reliable cross-window drop targeting, dragging the detached tab out
+  reattaches it to its recorded source pane.
+- Close empty detached windows after cross-window tab drops, deferring the close
+  until after the current GPUI event cycle to avoid invalidating drop dispatch.
+- Avoid reading a pane while it is already being updated when source and target
+  panes are the same during tab drop handling.
+
+After changing the integration branch, run:
+
+```sh
+cargo check -p workspace
+cargo check -p editor
+cargo test -p workspace test_handle_tab_drop_respects_is_pane_target
+cargo test -p workspace test_reattach_active_item_to_source_window
+cargo test -p workspace test_detach_active_item
 ```
 
 When adding one, use this branch format:
