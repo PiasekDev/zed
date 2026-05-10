@@ -29,11 +29,28 @@ jobs:
     env:
       CC: clang
       CXX: clang++
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Cache Cargo registry and git sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-sources-linux-x86_64-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-sources-linux-x86_64-
+
+      - name: Setup sccache
+        run: ./script/setup-sccache
 
       - name: Use stable replacement channel
         run: printf 'stable' > crates/zed/RELEASE_CHANNEL
@@ -46,6 +63,10 @@ jobs:
 
       - name: Bundle Zed
         run: ./script/bundle-linux
+
+      - name: Show sccache stats
+        if: always()
+        run: sccache --show-stats || true
 
       - name: Write checksums
         run: |
