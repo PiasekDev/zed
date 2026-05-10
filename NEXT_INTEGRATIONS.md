@@ -14,6 +14,7 @@ Start from `next-base`, then merge entries in this order:
 ```sh
 git switch -C next next-base
 git merge --no-ff scroll-to-switch-tabs -m "Merge scroll-to-switch-tabs into next"
+git merge --no-ff pr/46478-search-modal -m "Merge upstream PR 46478 into next"
 ```
 
 After merging any requested upstream PR snapshots, push only when the intended
@@ -42,7 +43,26 @@ git push --force-with-lease origin scroll-to-switch-tabs
 
 ## Upstream PR Snapshot Branches
 
-No upstream PR snapshot branches are currently integrated.
+| Branch | Upstream PR | Upstream Author | Snapshot Commit | Purpose | Merge Command |
+| --- | --- | --- | --- | --- | --- |
+| `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Adds a search modal for project-wide text search. | `git merge --no-ff pr/46478-search-modal -m "Merge upstream PR 46478 into next"` |
+
+### PR #46478 Integration Notes
+
+This PR is old relative to current `upstream/main`, so it requires local
+integration work when merged:
+
+- Resolve `crates/search/Cargo.toml` and `Cargo.lock` by keeping both
+  `smol` and `text` dependencies for the `search` crate.
+- In `crates/search/src/quick_search/delegate/picker_impl.rs`, handle the newer
+  transient `SearchResult::WaitingForScan` and `SearchResult::Searching`
+  variants by ignoring them in the quick-search result loop.
+
+After applying the merge, run:
+
+```sh
+cargo check -p search
+```
 
 When adding one, use this branch format:
 
@@ -65,7 +85,7 @@ git switch next
 git merge --no-ff pr/<number>-<short-name> -m "Merge upstream PR <number> into next"
 ```
 
-Add an entry to this table:
+Add an entry to the table above:
 
 | Branch | Upstream PR | Upstream Author | Snapshot Commit | Purpose | Merge Command |
 | --- | --- | --- | --- | --- | --- |
