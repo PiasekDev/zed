@@ -20,7 +20,8 @@ issue tracker, use:
   before they land upstream.
 
 See [FORK_NEXT.md](./FORK_NEXT.md) for the full branch, update, and release
-workflow.
+workflow. See [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md) for the current
+patch/PR integration manifest used to rebuild `next`.
 
 ## Installing
 
