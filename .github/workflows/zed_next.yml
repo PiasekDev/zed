@@ -52,6 +52,12 @@ jobs:
           cd target
           sha256sum release/zed-linux-x86_64.tar.gz zed-remote-server-linux-x86_64.gz > zed-next-SHA256SUMS.txt
 
+      - name: Write version metadata
+        run: |
+          version="$(script/get-crate-version zed)"
+          short_sha="$(git rev-parse --short HEAD)"
+          printf "%s.next.g%s\n" "$version" "$short_sha" > target/zed-next-version
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -60,6 +66,7 @@ jobs:
             target/release/zed-linux-x86_64.tar.gz
             target/zed-remote-server-linux-x86_64.gz
             target/zed-next-SHA256SUMS.txt
+            target/zed-next-version
           if-no-files-found: error
 
       - name: Publish moving zed-next release
@@ -81,4 +88,5 @@ jobs:
             --prerelease \
             target/release/zed-linux-x86_64.tar.gz \
             target/zed-remote-server-linux-x86_64.gz \
-            target/zed-next-SHA256SUMS.txt
+            target/zed-next-SHA256SUMS.txt \
+            target/zed-next-version

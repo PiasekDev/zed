@@ -1,7 +1,7 @@
 # Maintainer: PiasekDev
 
 pkgname=zed-next-bin
-pkgver=1.3.0.next
+pkgver=0.next.g0000000
 pkgrel=1
 pkgdesc="Personal replacement build of Zed from PiasekDev/zed next"
 arch=('x86_64')
@@ -23,8 +23,15 @@ depends=(
 )
 provides=('zed' 'zeditor')
 conflicts=('zed' 'zed-bin' 'zed-git' 'zed-next-git' 'zed-next-local')
-source=("zed-linux-x86_64.tar.gz::https://github.com/PiasekDev/zed/releases/download/zed-next/zed-linux-x86_64.tar.gz")
-sha256sums=('SKIP')
+source=(
+  "zed-linux-x86_64.tar.gz::https://github.com/PiasekDev/zed/releases/download/zed-next/zed-linux-x86_64.tar.gz"
+  "zed-next-version::https://github.com/PiasekDev/zed/releases/download/zed-next/zed-next-version"
+)
+sha256sums=('SKIP' 'SKIP')
+
+pkgver() {
+  tr -cd '[:alnum:]._' < "$srcdir/zed-next-version"
+}
 
 package() {
   install -dm755 "$pkgdir/usr/lib/zed" "$pkgdir/usr/bin" "$pkgdir/usr/share" "$pkgdir/usr/share/licenses/$pkgname"
