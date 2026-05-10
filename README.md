@@ -16,8 +16,9 @@ issue tracker, use:
 - `next`: daily-driver build branch. It starts from `next-base`, then merges
   personal patch branches and selected upstream PR branches.
 - `scroll-to-switch-tabs`: personal patch branch currently included in `next`.
-- `pr/<number>-<short-name>`: local branches for upstream Zed PRs being tested
-  before they land upstream.
+- `pr/<number>-<short-name>`: raw local snapshots of upstream Zed PRs.
+- `integration/<number>-<short-name>`: adapted PR branches that carry local
+  conflict resolutions or compatibility fixes.
 
 See [FORK_NEXT.md](./FORK_NEXT.md) for the full branch, update, and release
 workflow. See [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md) for the current

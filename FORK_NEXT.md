@@ -15,7 +15,8 @@ upstream pull requests.
   branches and selected upstream PR branches.
 - Custom patch branches: named directly, for example `scroll-to-switch-tabs`.
   Keep these rebaseable on top of `upstream/main`.
-- Upstream PR branches: use `pr/<number>-<short-name>`.
+- Raw upstream PR snapshot branches: use `pr/<number>-<short-name>`.
+- Adapted upstream PR integration branches: use `integration/<number>-<short-name>`.
 
 The current intended merge set is tracked in
 [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md). Update that file whenever a
@@ -54,7 +55,7 @@ git merge --no-ff scroll-to-switch-tabs -m "Merge scroll-to-switch-tabs into nex
 Use [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md) for the full ordered merge
 list.
 
-Then merge any selected upstream PR branches:
+Then merge any selected upstream PR or integration branches:
 
 ```sh
 git fetch upstream pull/<number>/head:pr/<number>-<short-name>
@@ -64,6 +65,11 @@ git merge --no-ff pr/<number>-<short-name> -m "Merge upstream PR <number> into n
 Use merge commits for upstream PRs so they are easy to revert or replace. Use
 rebases for personal patch branches so each long-lived personal change remains
 small and readable.
+
+If an upstream PR needs conflict resolutions or compatibility fixes, keep the
+raw `pr/*` branch untouched and create an adapted
+`integration/<number>-<short-name>` branch on top of `next-base`. Merge the
+adapted integration branch into `next`.
 
 When importing an upstream PR, push a personal snapshot branch to this fork so
 the exact tested code remains available even if the upstream PR branch is
@@ -156,7 +162,7 @@ When asked to update this fork:
 4. Rebase personal patch branches on `upstream/main`.
 5. Recreate `next` from `next-base`.
 6. Merge the branches listed in `NEXT_INTEGRATIONS.md` in order.
-7. Fetch and merge any requested upstream PR branches as `pr/<number>-<name>`.
+7. Fetch any requested upstream PR branches as `pr/<number>-<name>`.
 8. Update `NEXT_INTEGRATIONS.md` if the intended build set changed.
 9. Validate package metadata with `makepkg --printsrcinfo` for packages touched.
 10. Do not push `next` until the requested PR set is complete.
