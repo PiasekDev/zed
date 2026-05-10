@@ -1,0 +1,102 @@
+# Maintainer: PiasekDev
+
+pkgname=zed-next-git
+pkgver=1.3.0.next.r0.g0000000
+pkgrel=1
+pkgdesc="Personal source build of Zed from PiasekDev/zed next"
+arch=('x86_64')
+url="https://github.com/PiasekDev/zed"
+license=('GPL-3.0-or-later')
+depends=(
+  'alsa-lib'
+  'fontconfig'
+  'glib2'
+  'hicolor-icon-theme'
+  'libxcb'
+  'libxkbcommon'
+  'libxkbcommon-x11'
+  'openssl'
+  'sqlite'
+  'vulkan-icd-loader'
+  'wayland'
+  'zstd'
+)
+makedepends=(
+  'clang'
+  'cmake'
+  'curl'
+  'gettext'
+  'git'
+  'jq'
+  'lld'
+  'llvm'
+  'make'
+  'musl'
+  'pkgconf'
+  'rustup'
+)
+provides=('zed' 'zeditor')
+conflicts=('zed' 'zed-bin' 'zed-git' 'zed-next-bin' 'zed-next-local')
+
+_wasi_sdk_version=25
+source=(
+  'git+https://github.com/PiasekDev/zed.git#branch=next'
+  "wasi-sdk-${_wasi_sdk_version}.0-x86_64-linux.tar.gz::https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${_wasi_sdk_version}/wasi-sdk-${_wasi_sdk_version}.0-x86_64-linux.tar.gz"
+)
+sha256sums=('SKIP' 'SKIP')
+
+pkgver() {
+  cd zed
+  printf "1.3.0.next.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+  cd zed
+  mkdir -p target
+  rm -rf target/wasi-sdk
+  ln -s "$srcdir/wasi-sdk-${_wasi_sdk_version}.0-x86_64-linux" target/wasi-sdk
+}
+
+build() {
+  cd zed
+
+  printf "stable" > crates/zed/RELEASE_CHANNEL
+
+  export RELEASE_CHANNEL=stable
+  export ZED_RELEASE_CHANNEL=stable
+  export ZED_UPDATE_EXPLANATION="Update this PiasekDev Zed build through zed-next-git."
+
+  local rustflags="${RUSTFLAGS:-}"
+  if [[ " $rustflags " != *" symbol-mangling-version=v0 "* ]]; then
+    rustflags="${rustflags:+$rustflags }-C symbol-mangling-version=v0"
+  fi
+  if [[ " $rustflags " != *" --cfg tokio_unstable "* ]]; then
+    rustflags="${rustflags:+$rustflags }--cfg tokio_unstable"
+  fi
+
+  local target_cpu="${ZED_NEXT_TARGET_CPU-native}"
+  if [[ -n "$target_cpu" && " $rustflags " != *" target-cpu="* ]]; then
+    rustflags="${rustflags:+$rustflags }-C target-cpu=$target_cpu"
+  fi
+  export RUSTFLAGS="$rustflags"
+
+  script/bundle-linux
+}
+
+package() {
+  local bundle_dir="$srcdir/zed-next-git-bundle"
+  rm -rf "$bundle_dir"
+  mkdir -p "$bundle_dir"
+  tar -xzf "$srcdir/zed/target/release/zed-linux-x86_64.tar.gz" -C "$bundle_dir"
+
+  install -dm755 "$pkgdir/usr/lib/zed" "$pkgdir/usr/bin" "$pkgdir/usr/share" "$pkgdir/usr/share/licenses/$pkgname"
+
+  cp -a "$bundle_dir/zed.app/bin" "$pkgdir/usr/lib/zed/"
+  cp -a "$bundle_dir/zed.app/lib" "$pkgdir/usr/lib/zed/"
+  cp -a "$bundle_dir/zed.app/libexec" "$pkgdir/usr/lib/zed/"
+  cp -a "$bundle_dir/zed.app/share/." "$pkgdir/usr/share/"
+  install -Dm644 "$bundle_dir/zed.app/licenses.md" "$pkgdir/usr/share/licenses/$pkgname/licenses.md"
+
+  ln -s /usr/lib/zed/bin/zed "$pkgdir/usr/bin/zed"
+  ln -s /usr/lib/zed/bin/zed "$pkgdir/usr/bin/zeditor"
+}

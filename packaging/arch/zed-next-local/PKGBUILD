@@ -1,9 +1,9 @@
 # Maintainer: PiasekDev
 
-pkgname=zed-next-bin
-pkgver=1.3.0.next
+pkgname=zed-next-local
+pkgver=1.3.0.next.local
 pkgrel=1
-pkgdesc="Personal replacement build of Zed from PiasekDev/zed next"
+pkgdesc="Personal local replacement build of Zed from this checkout"
 arch=('x86_64')
 url="https://github.com/PiasekDev/zed"
 license=('GPL-3.0-or-later')
@@ -22,8 +22,10 @@ depends=(
   'zstd'
 )
 provides=('zed' 'zeditor')
-conflicts=('zed' 'zed-bin' 'zed-git' 'zed-next-git' 'zed-next-local')
-source=("zed-linux-x86_64.tar.gz::https://github.com/PiasekDev/zed/releases/download/zed-next/zed-linux-x86_64.tar.gz")
+conflicts=('zed' 'zed-bin' 'zed-git' 'zed-next-bin' 'zed-next-git')
+
+_bundle_path="${ZED_NEXT_BUNDLE_PATH:-$startdir/../../../target/release/zed-linux-x86_64.tar.gz}"
+source=("zed-linux-x86_64.tar.gz::file://${_bundle_path}")
 sha256sums=('SKIP')
 
 package() {

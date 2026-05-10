@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  cat <<EOF
+Usage: ${0##*/} [--no-build] [--no-install]
+
+Builds the current checkout as a stable-channel Zed replacement, then packages
+the local release tarball with makepkg.
+
+Environment:
+  ZED_NEXT_TARGET_CPU   Rust target CPU to compile for. Defaults to native.
+                        Set to an empty value to avoid adding target-cpu.
+  RUSTFLAGS             Preserved and augmented with Zed's required rustflags.
+  REMOTE_SERVER_TARGET  Forwarded to script/bundle-linux.
+EOF
+}
+
+build=true
+install=true
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-build)
+      build=false
+      shift
+      ;;
+    --no-install)
+      install=false
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "script/package-zed-next-local currently only supports Linux." >&2
+  exit 1
+fi
+
+if ! command -v makepkg >/dev/null 2>&1; then
+  echo "makepkg is required to package the local build." >&2
+  exit 1
+fi
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_dir"
+
+release_channel_file="crates/zed/RELEASE_CHANNEL"
+previous_release_channel="$(cat "$release_channel_file")"
+
+restore_release_channel() {
+  printf "%s" "$previous_release_channel" > "$release_channel_file"
+}
+
+trap restore_release_channel EXIT
+
+export RELEASE_CHANNEL=stable
+export ZED_RELEASE_CHANNEL=stable
+export ZED_UPDATE_EXPLANATION="Update this PiasekDev Zed build with script/package-zed-next-local."
+
+rustflags="${RUSTFLAGS:-}"
+
+if [[ " $rustflags " != *" symbol-mangling-version=v0 "* ]]; then
+  rustflags="${rustflags:+$rustflags }-C symbol-mangling-version=v0"
+fi
+
+if [[ " $rustflags " != *" --cfg tokio_unstable "* ]]; then
+  rustflags="${rustflags:+$rustflags }--cfg tokio_unstable"
+fi
+
+target_cpu="${ZED_NEXT_TARGET_CPU-native}"
+if [[ -n "$target_cpu" && " $rustflags " != *" target-cpu="* ]]; then
+  rustflags="${rustflags:+$rustflags }-C target-cpu=$target_cpu"
+fi
+
+export RUSTFLAGS="$rustflags"
+
+printf "stable" > "$release_channel_file"
+
+if [[ "$build" == true ]]; then
+  script/download-wasi-sdk
+  script/bundle-linux
+fi
+
+arch="$(uname -m)"
+archive="${CARGO_TARGET_DIR:-target}/release/zed-linux-${arch}.tar.gz"
+
+if [[ ! -f "$archive" ]]; then
+  echo "Missing local bundle: $archive" >&2
+  echo "Run ${0##*/} without --no-build first, or set CARGO_TARGET_DIR to the target dir used for the build." >&2
+  exit 1
+fi
+
+export ZED_NEXT_BUNDLE_PATH="$(realpath "$archive")"
+
+makepkg_args=(-C -f -s)
+if [[ "$install" == true ]]; then
+  makepkg_args+=(-i)
+fi
+
+(
+  cd packaging/arch/zed-next-local
+  makepkg "${makepkg_args[@]}"
+)

@@ -22,6 +22,8 @@ pkgbase = zed-next-bin
 	conflicts = zed
 	conflicts = zed-bin
 	conflicts = zed-git
+	conflicts = zed-next-git
+	conflicts = zed-next-local
 	source = zed-linux-x86_64.tar.gz::https://github.com/PiasekDev/zed/releases/download/zed-next/zed-linux-x86_64.tar.gz
 	sha256sums = SKIP
 
