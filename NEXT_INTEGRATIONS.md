@@ -71,10 +71,13 @@ git merge --no-ff --no-commit pr/<number>-<short-name>
 git commit -m "Adapt <short description> PR for next"
 ```
 
-Include source attribution in the integration commit body:
+Include source attribution in the integration commit body. Do not include
+GitHub autolinks such as `owner/repo#123`, `#123`, or full pull request URLs in
+commit messages, because GitHub creates timeline references on the upstream PR.
 
 ```text
-Source: zed-industries/zed#<number>
+Upstream-repository: zed-industries/zed
+Upstream-pull-request: <number>
 Original-author: <github-login>
 Snapshot: <raw-pr-head-sha>
 ```
