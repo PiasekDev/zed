@@ -68,6 +68,12 @@ build() {
   export ZED_RELEASE_CHANNEL=stable
   export ZED_UPDATE_EXPLANATION="Update this PiasekDev Zed build through zed-next-git."
 
+  local remote_server_target="${REMOTE_SERVER_TARGET:-x86_64-unknown-linux-musl}"
+  if [[ "$remote_server_target" == "x86_64-unknown-linux-musl" ]]; then
+    export CC_x86_64_unknown_linux_musl="${CC_x86_64_unknown_linux_musl:-musl-gcc}"
+    export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="${CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER:-musl-gcc}"
+  fi
+
   local rustflags="${RUSTFLAGS:-}"
   if [[ " $rustflags " != *" symbol-mangling-version=v0 "* ]]; then
     rustflags="${rustflags:+$rustflags }-C symbol-mangling-version=v0"
