@@ -16,7 +16,10 @@ upstream pull requests.
 - Custom patch branches: named directly, for example `scroll-to-switch-tabs`.
   Keep these rebaseable on top of `upstream/main`.
 - Raw upstream PR snapshot branches: use `pr/<number>-<short-name>`.
-- Adapted upstream PR integration branches: use `integration/<number>-<short-name>`.
+- Raw external fork snapshot branches: use `external/<owner>-<short-name>`.
+- Adapted integration branches: use `integration/<number>-<short-name>` for
+  upstream PRs and `integration/<owner-or-feature>-<short-name>` for external
+  forks.
 
 The current intended merge set is tracked in
 [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md). Update that file whenever a
@@ -70,6 +73,14 @@ If an upstream PR needs conflict resolutions or compatibility fixes, keep the
 raw `pr/*` branch untouched and create an adapted
 `integration/<number>-<short-name>` branch on top of `next-base`. Merge the
 adapted integration branch into `next`.
+
+For external fork work, keep a raw `external/*` branch as the source snapshot
+and create an adapted `integration/*` branch for the version that should merge
+into this fork. Prefer layered integration history for new work: import the raw
+source as its own commit or merge commit, then add compatibility fixes and
+personal tailoring as follow-up commits. This makes it easy to inspect what was
+changed beyond the original source. Some current integrations predate this
+workflow and may be split into layered commits in a future cleanup.
 
 When importing an upstream PR, push a personal snapshot branch to this fork so
 the exact tested code remains available even if the upstream PR branch is
@@ -170,6 +181,7 @@ When asked to update this fork:
 5. Recreate `next` from `next-base`.
 6. Merge the branches listed in `NEXT_INTEGRATIONS.md` in order.
 7. Fetch any requested upstream PR branches as `pr/<number>-<name>`.
-8. Update `NEXT_INTEGRATIONS.md` if the intended build set changed.
-9. Validate package metadata with `makepkg --printsrcinfo` for packages touched.
-10. Do not push `next` until the requested PR set is complete.
+8. Fetch any requested external fork branches as `external/<owner>-<name>`.
+9. Update `NEXT_INTEGRATIONS.md` if the intended build set changed.
+10. Validate package metadata with `makepkg --printsrcinfo` for packages touched.
+11. Do not push `next` until the requested PR set is complete.

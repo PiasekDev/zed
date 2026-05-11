@@ -9,13 +9,14 @@ snapshot is added to or removed from `next`.
 Start from `next-base`, then merge entries in this order:
 
 1. Custom patch branches
-2. Adapted integration branches for upstream PRs
+2. Adapted integration branches for upstream PRs and external forks
 
 ```sh
 git switch -C next next-base
 git merge --no-ff scroll-to-switch-tabs -m "Merge scroll-to-switch-tabs into next"
 git merge --no-ff integration/46478-search-modal -m "Merge search modal integration into next"
 git merge --no-ff integration/55404-detachable-items -m "Merge detachable item integration into next"
+git merge --no-ff integration/firatoezcan-git-ui -m "Merge firatoezcan Git UI integration into next"
 ```
 
 After merging any requested upstream PR snapshots, push only when the intended
@@ -53,6 +54,7 @@ rebases on `next-base`.
 | --- | --- | --- | --- | --- | --- | --- |
 | `integration/46478-search-modal` | `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Adds a search modal for project-wide text search. | `git merge --no-ff integration/46478-search-modal -m "Merge search modal integration into next"` |
 | `integration/55404-detachable-items` | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Adds detachable editor items, with local drag-out/reattach behavior and maximized detached windows. | `git merge --no-ff integration/55404-detachable-items -m "Merge detachable item integration into next"` |
+| `integration/firatoezcan-git-ui` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `eec3b368a7f738e184ace3892b1c52c4f9bcf825` | Adds Git panel single-file diff/history improvements, with local defaults and staged/unstaged fixes. | `git merge --no-ff integration/firatoezcan-git-ui -m "Merge firatoezcan Git UI integration into next"` |
 
 ### Integration Branch Maintenance
 
@@ -66,6 +68,10 @@ git push --force-with-lease origin integration/46478-search-modal
 git switch integration/55404-detachable-items
 git rebase next-base
 git push --force-with-lease origin integration/55404-detachable-items
+
+git switch integration/firatoezcan-git-ui
+git rebase next-base
+git push --force-with-lease origin integration/firatoezcan-git-ui
 ```
 
 When creating a new adapted integration branch:
@@ -88,12 +94,44 @@ Original-author: <github-login>
 Snapshot: <raw-pr-head-sha>
 ```
 
+### Layered Integration Workflow
+
+For future integrations, prefer a layered branch history:
+
+1. Keep the raw source snapshot untouched as `pr/<number>-<short-name>` for
+   upstream PRs or `external/<owner>-<short-name>` for external forks.
+2. Create the adapted integration branch from `next-base`.
+3. Import the source as its own commit or merge commit with minimal conflict
+   resolution.
+4. Add local fork tailoring as follow-up commits.
+5. Merge the adapted integration branch into `next`.
+
+This keeps the raw source, compatibility work, and personal tailoring easy to
+inspect separately. Useful inspection commands:
+
+```sh
+git log --oneline <raw-source-branch>..integration/<short-name>
+git diff <import-commit>..integration/<short-name>
+```
+
+The current `integration/firatoezcan-git-ui` branch was created before this
+workflow was documented and currently keeps the extracted source and local
+adaptations in one adapted commit. TODO: optionally split existing integration
+branches into layered import/adaptation commits during a future cleanup pass.
+
 ## Raw Upstream PR Snapshot Branches
 
 | Branch | Upstream PR | Upstream Author | Snapshot Commit | Purpose | Merge Command |
 | --- | --- | --- | --- | --- | --- |
 | `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Raw upstream source snapshot for `integration/46478-search-modal`. | Do not merge directly into `next`; merge the adapted `integration/46478-search-modal` branch. |
 | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Raw upstream source snapshot for `integration/55404-detachable-items`. | Do not merge directly into `next`; merge the adapted `integration/55404-detachable-items` branch. |
+
+## Raw External Fork Snapshot Branches
+
+| Branch | External Source | Author | Snapshot Commit | Purpose | Merge Command |
+| --- | --- | --- | --- | --- | --- |
+| `external/firatoezcan-main` | `firatoezcan/zed`, branch `main` | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908c4b4e1d8e7cbb0ca669e68d511314a3` | Raw external fork snapshot used to extract `integration/firatoezcan-git-ui`. | Do not merge directly into `next`; merge the adapted `integration/firatoezcan-git-ui` branch. |
+| `external/firatoezcan-git-ui-improvements` | `firatoezcan/zed`, branch `autoresearch/git-ui-improvements-2026-04-04` | Firat Ozcan `<admin@firatoezcan.com>` | `8ae6296bb0790506f53b3c2022429a9bb705b4d2` | Raw external exploratory branch retained as source/reference material. | Do not merge directly into `next`. |
 
 ### PR #46478 Integration Notes
 
@@ -138,6 +176,36 @@ cargo check -p editor
 cargo test -p workspace test_handle_tab_drop_respects_is_pane_target
 cargo test -p workspace test_reattach_active_item_to_source_window
 cargo test -p workspace test_detach_active_item
+```
+
+### firatoezcan Git UI Integration Notes
+
+The raw source is kept locally as `external/firatoezcan-main`. The adapted
+`integration/firatoezcan-git-ui` branch extracts the useful Git UI feature work
+and intentionally omits the fork README and `build_fork` GitHub Actions changes,
+because this fork already has its own README, package flow, and `zed-next`
+release workflow.
+
+Local adaptations in the current branch:
+
+- Enable `git.single_file_diff` by default so Git panel file clicks open a
+  whole-file single-file diff tab instead of the shared Project Diff
+  multibuffer excerpt view.
+- Fix duplicated staged/unstaged Git panel rows for partially staged files so
+  selecting a path can preserve whether the user clicked the staged row or the
+  unstaged row.
+- Fix filtered Head diffs for partially staged files so staged rows show
+  `HEAD -> index` and unstaged rows show `index -> working tree`, instead of
+  collapsing to the final `HEAD -> working tree` comparison.
+- Center newly opened single-file diff tabs on the first diff hunk.
+- Add coverage for partially staged staged/unstaged selection and diff content.
+
+After changing the integration branch, run:
+
+```sh
+cargo test -p git_ui test_filtered_head_diff_uses_index_for_partially_staged_file
+cargo test -p git_ui test_select_entry_by_path_prefers_staged_row_for_partially_staged_file
+cargo check -p git_ui
 ```
 
 When adding one, use this branch format:
