@@ -67,6 +67,7 @@ build() {
   export RELEASE_CHANNEL=stable
   export ZED_RELEASE_CHANNEL=stable
   export ZED_UPDATE_EXPLANATION="Update this PiasekDev Zed build through zed-next-git."
+  export CARGO_TARGET_DIR="$srcdir/zed/target"
 
   local remote_server_target="${REMOTE_SERVER_TARGET:-x86_64-unknown-linux-musl}"
   if [[ "$remote_server_target" == "x86_64-unknown-linux-musl" ]]; then

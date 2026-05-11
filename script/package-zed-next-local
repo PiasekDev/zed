@@ -59,7 +59,7 @@ release_channel_file="crates/zed/RELEASE_CHANNEL"
 previous_release_channel="$(cat "$release_channel_file")"
 
 restore_release_channel() {
-  printf "%s" "$previous_release_channel" > "$release_channel_file"
+  printf "%s\n" "$previous_release_channel" > "$release_channel_file"
 }
 
 trap restore_release_channel EXIT
@@ -95,7 +95,7 @@ fi
 
 export RUSTFLAGS="$rustflags"
 
-printf "stable" > "$release_channel_file"
+printf "stable\n" > "$release_channel_file"
 
 if [[ "$build" == true ]]; then
   script/download-wasi-sdk
@@ -103,11 +103,16 @@ if [[ "$build" == true ]]; then
 fi
 
 arch="$(uname -m)"
-archive="${CARGO_TARGET_DIR:-target}/release/zed-linux-${arch}.tar.gz"
+target_dir="$(cargo metadata --format-version=1 --no-deps | tr ',' '\n' | sed -n 's/^"target_directory":"\([^"]*\)".*/\1/p')"
+if [[ -z "$target_dir" ]]; then
+  echo "Failed to determine Cargo target directory." >&2
+  exit 1
+fi
+archive="${target_dir}/release/zed-linux-${arch}.tar.gz"
 
 if [[ ! -f "$archive" ]]; then
   echo "Missing local bundle: $archive" >&2
-  echo "Run ${0##*/} without --no-build first, or set CARGO_TARGET_DIR to the target dir used for the build." >&2
+  echo "Run ${0##*/} without --no-build first." >&2
   exit 1
 fi
 
