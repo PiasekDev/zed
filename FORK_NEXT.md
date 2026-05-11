@@ -122,8 +122,10 @@ The workflow builds the app for glibc Linux and the remote server for musl. Keep
 the musl target-specific compiler settings in `.github/workflows/zed_next.yml`;
 using the host glibc compiler for native C dependencies can make the static
 musl remote server fail to link. The workflow also enables `sccache` with the
-GitHub Actions cache backend and caches Cargo registry/git sources to make
-repeated builds faster.
+GitHub Actions cache backend through `mozilla-actions/sccache-action` and caches
+Cargo registry/git sources to make repeated builds faster. Do not set
+`SCCACHE_GHA_ENABLED` and `RUSTC_WRAPPER` before that action runs; raw `sccache`
+needs the GitHub Actions cache URL and runtime token that the action exposes.
 
 ## Installing
 

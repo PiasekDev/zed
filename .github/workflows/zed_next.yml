@@ -31,8 +31,6 @@ jobs:
       CXX: clang++
       CC_x86_64_unknown_linux_musl: musl-gcc
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: sccache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,7 +48,14 @@ jobs:
             cargo-sources-linux-x86_64-
 
       - name: Setup sccache
-        run: ./script/setup-sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+        with:
+          version: "v0.10.0"
+
+      - name: Enable sccache
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
       - name: Use stable replacement channel
         run: printf 'stable' > crates/zed/RELEASE_CHANNEL
@@ -66,7 +71,7 @@ jobs:
 
       - name: Show sccache stats
         if: always()
-        run: sccache --show-stats || true
+        run: ${SCCACHE_PATH:-sccache} --show-stats || true
 
       - name: Write checksums
         run: |
