@@ -2,11 +2,12 @@
 
 pkgname=zed-next-local
 pkgver=0.next.local
-pkgrel=1
+pkgrel=2
 pkgdesc="Personal local replacement build of Zed from this checkout"
 arch=('x86_64')
 url="https://github.com/PiasekDev/zed"
 license=('GPL-3.0-or-later')
+options=('!debug')
 depends=(
   'alsa-lib'
   'fontconfig'

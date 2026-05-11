@@ -2,11 +2,12 @@
 
 pkgname=zed-next-git
 pkgver=0.next.r0.g0000000
-pkgrel=1
+pkgrel=2
 pkgdesc="Personal source build of Zed from PiasekDev/zed next"
 arch=('x86_64')
 url="https://github.com/PiasekDev/zed"
 license=('GPL-3.0-or-later')
+options=('!debug')
 depends=(
   'alsa-lib'
   'fontconfig'
