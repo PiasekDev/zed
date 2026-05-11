@@ -120,10 +120,10 @@ git log --oneline <raw-source-branch>..integration/<short-name>
 git diff <import-commit>..integration/<short-name>
 ```
 
-The current `integration/firatoezcan-git-ui` branch was created before this
-workflow was documented and currently keeps the extracted source and local
-adaptations in one adapted commit. TODO: optionally split existing integration
-branches into layered import/adaptation commits during a future cleanup pass.
+Some current integration branches are cleanly based on `next-base`, but still
+keep the source extraction, conflict resolution, and local adaptations in one
+adapted commit. TODO: optionally split existing integration branches into
+layered import/adaptation commits during a future cleanup pass.
 
 ## Raw Upstream PR Snapshot Branches
 
