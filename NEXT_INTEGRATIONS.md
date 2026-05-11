@@ -17,6 +17,7 @@ git merge --no-ff scroll-to-switch-tabs -m "Merge scroll-to-switch-tabs into nex
 git merge --no-ff integration/46478-search-modal -m "Merge search modal integration into next"
 git merge --no-ff integration/55404-detachable-items -m "Merge detachable item integration into next"
 git merge --no-ff integration/firatoezcan-git-ui -m "Merge firatoezcan Git UI integration into next"
+git merge --no-ff integration/28674-tailwind-rust-completion -m "Merge Tailwind Rust completion integration into next"
 ```
 
 After merging any requested upstream PR snapshots, push only when the intended
@@ -55,6 +56,7 @@ rebases on `next-base`.
 | `integration/46478-search-modal` | `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Adds a search modal for project-wide text search. | `git merge --no-ff integration/46478-search-modal -m "Merge search modal integration into next"` |
 | `integration/55404-detachable-items` | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Adds detachable editor items, with local drag-out/reattach behavior and maximized detached windows. | `git merge --no-ff integration/55404-detachable-items -m "Merge detachable item integration into next"` |
 | `integration/firatoezcan-git-ui` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `eec3b368a7f738e184ace3892b1c52c4f9bcf825` | Adds Git panel single-file diff/history improvements, with local defaults and staged/unstaged fixes. | `git merge --no-ff integration/firatoezcan-git-ui -m "Merge firatoezcan Git UI integration into next"` |
+| `integration/28674-tailwind-rust-completion` | `pr/28674-tailwind-rust-completion` | [zed-industries/zed#28674](https://github.com/zed-industries/zed/pull/28674) | `I-Info` | `19a316e2b359c1bfaa2cff1af1c57581df76bd5d` | Enables Tailwind CSS completions in Rust string contexts. | `git merge --no-ff integration/28674-tailwind-rust-completion -m "Merge Tailwind Rust completion integration into next"` |
 
 ### Integration Branch Maintenance
 
@@ -72,6 +74,10 @@ git push --force-with-lease origin integration/55404-detachable-items
 git switch integration/firatoezcan-git-ui
 git rebase next-base
 git push --force-with-lease origin integration/firatoezcan-git-ui
+
+git switch integration/28674-tailwind-rust-completion
+git rebase next-base
+git push --force-with-lease origin integration/28674-tailwind-rust-completion
 ```
 
 When creating a new adapted integration branch:
@@ -125,6 +131,7 @@ branches into layered import/adaptation commits during a future cleanup pass.
 | --- | --- | --- | --- | --- | --- |
 | `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Raw upstream source snapshot for `integration/46478-search-modal`. | Do not merge directly into `next`; merge the adapted `integration/46478-search-modal` branch. |
 | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Raw upstream source snapshot for `integration/55404-detachable-items`. | Do not merge directly into `next`; merge the adapted `integration/55404-detachable-items` branch. |
+| `pr/28674-tailwind-rust-completion` | [zed-industries/zed#28674](https://github.com/zed-industries/zed/pull/28674) | `I-Info` | `19a316e2b359c1bfaa2cff1af1c57581df76bd5d` | Raw upstream source snapshot for `integration/28674-tailwind-rust-completion`. | Do not merge directly into `next`; merge the adapted `integration/28674-tailwind-rust-completion` branch. |
 
 ## Raw External Fork Snapshot Branches
 
@@ -176,6 +183,19 @@ cargo check -p editor
 cargo test -p workspace test_handle_tab_drop_respects_is_pane_target
 cargo test -p workspace test_reattach_active_item_to_source_window
 cargo test -p workspace test_detach_active_item
+```
+
+### PR #28674 Integration Notes
+
+The upstream PR changed the old Rust language config path. In current Zed, the
+adapted branch applies the same Rust string override in
+`crates/grammars/src/rust/config.toml` and also adds `Rust` to the built-in
+Tailwind language registration list in `crates/languages/src/lib.rs`.
+
+After changing the integration branch, run:
+
+```sh
+cargo check -p languages
 ```
 
 ### firatoezcan Git UI Integration Notes
