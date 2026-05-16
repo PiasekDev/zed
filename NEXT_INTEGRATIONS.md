@@ -159,6 +159,9 @@ This PR is old relative to current `upstream/main`, so the adapted
 - In `crates/search/src/quick_search/delegate/picker_impl.rs`, handle the newer
   transient `SearchResult::WaitingForScan` and `SearchResult::Searching`
   variants by ignoring them in the quick-search result loop.
+- In `crates/search/src/quick_search.rs`, call `query_suggestion(None, ...)`
+  to use the current optional seed-query override API while preserving the
+  original "respect settings" behavior.
 
 After changing the integration branch, run:
 
