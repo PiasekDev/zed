@@ -51,12 +51,17 @@ Use adapted integration branches for upstream PRs that do not merge cleanly into
 attribution/source snapshot, then maintain an `integration/*` branch that
 rebases on `next-base`.
 
-| Branch | Raw Source Branch | Upstream PR | Upstream Author | Snapshot Commit | Purpose | Merge Command |
+| Branch | Raw Source Branch | Upstream PR | Upstream Author | Source Anchor | Purpose | Merge Command |
 | --- | --- | --- | --- | --- | --- | --- |
 | `integration/46478-search-modal` | `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Adds a search modal for project-wide text search. | `git merge --no-ff integration/46478-search-modal -m "Merge search modal integration into next"` |
 | `integration/55404-detachable-items` | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Adds detachable editor items, with local drag-out/reattach behavior and maximized detached windows. | `git merge --no-ff integration/55404-detachable-items -m "Merge detachable item integration into next"` |
-| `integration/firatoezcan-git-ui` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908c4b4e1d8e7cbb0ca669e68d511314a3` | Adds Git panel single-file diff/history improvements, with local defaults and staged/unstaged fixes. | `git merge --no-ff integration/firatoezcan-git-ui -m "Merge firatoezcan Git UI integration into next"` |
+| `integration/firatoezcan-git-ui` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908006e3d206257239df57530b32418e0` | Adds Git panel single-file diff/history improvements, with local defaults and staged/unstaged fixes. | `git merge --no-ff integration/firatoezcan-git-ui -m "Merge firatoezcan Git UI integration into next"` |
 | `integration/28674-tailwind-rust-completion` | `pr/28674-tailwind-rust-completion` | [zed-industries/zed#28674](https://github.com/zed-industries/zed/pull/28674) | `I-Info` | `19a316e2b359c1bfaa2cff1af1c57581df76bd5d` | Enables Tailwind CSS completions in Rust string contexts. | `git merge --no-ff integration/28674-tailwind-rust-completion -m "Merge Tailwind Rust completion integration into next"` |
+
+`Source Anchor` is the immutable upstream or external revision used as the
+reference point for an integration. It may be a raw source branch tip, a
+specific feature commit inside a source branch, or an external fork snapshot,
+depending on what was actually imported.
 
 ### Integration Branch Maintenance
 
@@ -126,7 +131,7 @@ import commit when there are no local behavior changes to separate.
 
 ## Raw Upstream PR Snapshot Branches
 
-| Branch | Upstream PR | Upstream Author | Snapshot Commit | Purpose | Merge Command |
+| Branch | Upstream PR | Upstream Author | Source Anchor | Purpose | Merge Command |
 | --- | --- | --- | --- | --- | --- |
 | `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Raw upstream source snapshot for `integration/46478-search-modal`. | Do not merge directly into `next`; merge the adapted `integration/46478-search-modal` branch. |
 | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Raw upstream source snapshot for `integration/55404-detachable-items`. | Do not merge directly into `next`; merge the adapted `integration/55404-detachable-items` branch. |
@@ -134,12 +139,17 @@ import commit when there are no local behavior changes to separate.
 
 ## Raw External Fork Snapshot Branches
 
-| Branch | External Source | Author | Snapshot Commit | Purpose | Merge Command |
+| Branch | External Source | Author | Source Anchor | Purpose | Merge Command |
 | --- | --- | --- | --- | --- | --- |
-| `external/firatoezcan-main` | `firatoezcan/zed`, branch `main` | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908c4b4e1d8e7cbb0ca669e68d511314a3` | Raw external fork snapshot used to extract `integration/firatoezcan-git-ui`. | Do not merge directly into `next`; merge the adapted `integration/firatoezcan-git-ui` branch. |
+| `external/firatoezcan-main` | `firatoezcan/zed`, branch `main` | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908006e3d206257239df57530b32418e0` | Raw external fork snapshot used to extract `integration/firatoezcan-git-ui`. | Do not merge directly into `next`; merge the adapted `integration/firatoezcan-git-ui` branch. |
 | `external/firatoezcan-git-ui-improvements` | `firatoezcan/zed`, branch `autoresearch/git-ui-improvements-2026-04-04` | Firat Ozcan `<admin@firatoezcan.com>` | `8ae6296bb0790506f53b3c2022429a9bb705b4d2` | Raw external exploratory branch retained as source/reference material. | Do not merge directly into `next`. |
 
 ### PR #46478 Integration Notes
+
+Import basis: PR head snapshot
+`54e639eab83a9a2315be9a68d084c94effa68001`. The feature is spread across the
+PR branch history, so the integration imports the branch state at that snapshot
+and carries only mechanical compatibility work.
 
 This PR is old relative to current `upstream/main`, so the adapted
 `integration/46478-search-modal` branch carries local integration work:
@@ -157,6 +167,9 @@ cargo check -p search
 ```
 
 ### PR #55404 Integration Notes
+
+Import basis: single upstream feature commit
+`f7321ff6c3993eeec93d51a4953c3c9421600d24`.
 
 This PR needs an adapted branch for conflict resolution against current
 `next-base` and local behavior changes:
@@ -186,6 +199,10 @@ cargo test -p workspace test_detach_active_item
 
 ### PR #28674 Integration Notes
 
+Import basis: feature commit `19a316e2b359c1bfaa2cff1af1c57581df76bd5d`.
+The raw PR branch later merged `main`, so the useful Tailwind Rust change is
+anchored to the older feature commit rather than the raw branch tip.
+
 The upstream PR changed the old Rust language config path. In current Zed, the
 adapted branch applies the same Rust string override in
 `crates/grammars/src/rust/config.toml` and also adds `Rust` to the built-in
@@ -198,6 +215,10 @@ cargo check -p languages
 ```
 
 ### firatoezcan Git UI Integration Notes
+
+Import basis: external fork snapshot
+`bd20394908006e3d206257239df57530b32418e0`. The integration extracts only the
+useful Git UI feature work from that snapshot.
 
 The raw source is kept locally as `external/firatoezcan-main`. The adapted
 `integration/firatoezcan-git-ui` branch extracts the useful Git UI feature work
