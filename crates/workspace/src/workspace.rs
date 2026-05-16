@@ -6025,41 +6025,37 @@ impl Workspace {
         });
     }
 
-    /// Returns the active item to its source workspace and closes this window.
-    /// Has no effect if this workspace was not opened via
-    /// `DetachActiveItem` or if the source no longer exists.
-    pub fn reattach_active_item_to_source_window(
+    pub(crate) fn reattach_item_to_source_window(
         &mut self,
+        detached_pane: Entity<Pane>,
+        item_id: EntityId,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(detached_from) = self.detached_from.clone() else {
-            return;
+            return false;
         };
 
         let source_workspace = match detached_from.workspace.upgrade() {
             Some(workspace) => workspace,
             None => {
                 window.remove_window();
-                return;
+                return true;
             }
         };
 
         let source_pane = detached_from
             .pane
             .upgrade()
-            .or_else(|| Some(source_workspace.read(cx).active_pane.clone()));
-        let Some(source_pane) = source_pane else {
-            window.remove_window();
-            return;
-        };
+            .unwrap_or_else(|| source_workspace.read(cx).active_pane.clone());
 
-        let detached_pane = self.active_pane.clone();
-        let Some(active_item) = detached_pane.read(cx).active_item() else {
-            window.remove_window();
-            return;
-        };
-        let item_id = active_item.item_id();
+        if detached_pane
+            .read(cx)
+            .items()
+            .all(|item| item.item_id() != item_id)
+        {
+            return false;
+        }
 
         let destination_index = source_pane.read(cx).items_len();
         move_item(
@@ -6073,6 +6069,29 @@ impl Workspace {
         );
 
         window.remove_window();
+        true
+    }
+
+    /// Returns the active item to its source workspace and closes this window.
+    /// Has no effect if this workspace was not opened via
+    /// `DetachActiveItem` or if the source no longer exists.
+    pub fn reattach_active_item_to_source_window(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.detached_from.is_none() {
+            return;
+        }
+
+        let detached_pane = self.active_pane.clone();
+        let Some(active_item) = detached_pane.read(cx).active_item() else {
+            window.remove_window();
+            return;
+        };
+        let item_id = active_item.item_id();
+
+        self.reattach_item_to_source_window(detached_pane, item_id, window, cx);
     }
 
     pub fn bounding_box_for_pane(&self, pane: &Entity<Pane>) -> Option<Bounds<Pixels>> {
