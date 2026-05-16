@@ -1137,7 +1137,6 @@ impl Item for Editor {
         // has to follow the editor when it moves between windows. Replacing
         // the field drops any prior subscription, keeping exactly one live
         // observer per editor.
-        self.show_mouse_cursor(cx);
         let blink_manager = self.blink_manager.clone();
         blink_manager.update(cx, |blink_manager, cx| {
             if window.is_window_active() {
@@ -1156,9 +1155,6 @@ impl Item for Editor {
                         blink_manager.disable(cx);
                     }
                 });
-                if active {
-                    editor.show_mouse_cursor(cx);
-                }
             }));
 
         // Load persisted folds if this editor doesn't already have folds.

@@ -1,5 +1,5 @@
 use crate::{
-    CloseWindow, DetachActiveItem, NewCenterTerminal, NewFile, NewTerminal,
+    CloseWindow, DetachActiveItem, MultiWorkspace, NewCenterTerminal, NewFile, NewTerminal,
     OpenInTerminal, OpenOptions, OpenTerminal, OpenVisible, SplitDirection, ToggleFileFinder,
     ToggleProjectSymbols, ToggleZoom, Workspace, WorkspaceItemBuilder, ZoomIn, ZoomOut,
     focus_follows_mouse::FocusFollowsMouse as _,
@@ -19,11 +19,11 @@ use collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use futures::{StreamExt, stream::FuturesUnordered};
 use git::{CopyFilePermalink, OpenFilePermalink};
 use gpui::{
-    Action, Anchor, AnyElement, App, AsyncWindowContext, ClickEvent, ClipboardItem, Context, Div,
-    DragMoveEvent, Entity, EntityId, EventEmitter, ExternalPaths, FocusHandle, FocusOutEvent,
-    Focusable, KeyContext, MouseButton, NavigationDirection, Pixels, Point, PromptLevel, Render,
-    ScrollHandle, Subscription, Task, TaskExt, WeakEntity, WeakFocusHandle, Window, actions,
-    anchored, deferred, prelude::*,
+    Action, Anchor, AnyElement, App, AsyncWindowContext, Bounds, ClickEvent, ClipboardItem,
+    Context, Div, DragMoveEvent, Entity, EntityId, EventEmitter, ExternalPaths, FocusHandle,
+    FocusOutEvent, Focusable, KeyContext, MouseButton, MouseUpEvent, NavigationDirection, Pixels,
+    Point, PromptLevel, Render, ScrollHandle, Subscription, Task, TaskExt, WeakEntity,
+    WeakFocusHandle, Window, WindowHandle, WindowId, actions, anchored, deferred, prelude::*,
 };
 use itertools::Itertools;
 use language::{Capability, DiagnosticSeverity};
@@ -415,6 +415,7 @@ pub struct Pane {
     pub(crate) workspace: WeakEntity<Workspace>,
     project: WeakEntity<Project>,
     pub drag_split_direction: Option<SplitDirection>,
+    dragged_tab_outside_window: Option<DraggedTab>,
     can_drop_predicate: Option<Arc<dyn Fn(&dyn Any, &mut Window, &mut App) -> bool>>,
     can_split_predicate:
         Option<Arc<dyn Fn(&mut Self, &dyn Any, &mut Window, &mut Context<Self>) -> bool>>,
@@ -599,6 +600,7 @@ impl Pane {
             tab_bar_scroll_handle: ScrollHandle::new(),
             suppress_scroll: false,
             drag_split_direction: None,
+            dragged_tab_outside_window: None,
             workspace,
             project: project.downgrade(),
             can_drop_predicate,
@@ -3867,6 +3869,175 @@ impl Pane {
         }
     }
 
+    fn track_tab_drag_for_detach(
+        &mut self,
+        event: &DragMoveEvent<DraggedTab>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let window_bounds = Bounds::new(Point::default(), window.viewport_size());
+        if window_bounds.contains(&event.event.position) {
+            self.dragged_tab_outside_window = None;
+        } else {
+            self.dragged_tab_outside_window = Some(event.drag(cx).clone());
+        }
+    }
+
+    fn detach_tab_dragged_out_of_window(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let window_bounds = Bounds::new(Point::default(), window.viewport_size());
+        if window_bounds.contains(&event.position) {
+            self.dragged_tab_outside_window = None;
+            return;
+        }
+
+        let Some(dragged_tab) = self.dragged_tab_outside_window.take() else {
+            return;
+        };
+
+        let screen_position = window.inner_window_bounds().get_bounds().origin + event.position;
+        if let Some(target_window) = Self::workspace_window_under_position(
+            screen_position,
+            window.window_handle().window_id(),
+            cx,
+        ) {
+            self.move_dragged_tab_to_workspace_window(&dragged_tab, target_window, window, cx);
+        } else {
+            self.reattach_or_detach_dragged_tab_without_target_window(&dragged_tab, window, cx);
+        }
+
+        cx.stop_active_drag(window);
+        cx.stop_propagation();
+    }
+
+    fn workspace_window_under_position(
+        screen_position: Point<Pixels>,
+        source_window_id: WindowId,
+        cx: &mut App,
+    ) -> Option<WindowHandle<MultiWorkspace>> {
+        let mut window_at_position = None;
+
+        for window_handle in cx.windows() {
+            if window_handle.window_id() == source_window_id {
+                continue;
+            }
+
+            let Some(window_handle) = window_handle.downcast::<MultiWorkspace>() else {
+                continue;
+            };
+
+            let Some((is_hovered, is_under_position)) = window_handle
+                .update(cx, |_, window, _| {
+                    (
+                        window.is_window_hovered(),
+                        window
+                            .inner_window_bounds()
+                            .get_bounds()
+                            .contains(&screen_position),
+                    )
+                })
+                .log_err()
+            else {
+                continue;
+            };
+
+            if is_hovered {
+                return Some(window_handle);
+            }
+
+            if is_under_position {
+                window_at_position = Some(window_handle);
+            }
+        }
+
+        window_at_position
+    }
+
+    fn move_dragged_tab_to_workspace_window(
+        &mut self,
+        dragged_tab: &DraggedTab,
+        target_window: WindowHandle<MultiWorkspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let from_pane = dragged_tab.pane.clone();
+        let from_workspace = if from_pane == cx.entity() {
+            self.workspace.clone()
+        } else {
+            from_pane.read(cx).workspace.clone()
+        };
+        let item_id = dragged_tab.item.item_id();
+
+        self.drag_split_direction = None;
+        self.workspace
+            .update(cx, |_, cx| {
+                cx.defer_in(window, move |_, _, cx| {
+                    let destination_workspace =
+                        match target_window.update(cx, |multi_workspace, window, cx| {
+                            let destination_workspace = multi_workspace.workspace().clone();
+                            let destination_pane =
+                                destination_workspace.read(cx).active_pane().clone();
+                            let destination_index = destination_pane.read(cx).items_len();
+                            move_item(
+                                &from_pane,
+                                &destination_pane,
+                                item_id,
+                                destination_index,
+                                true,
+                                window,
+                                cx,
+                            );
+                            destination_workspace.read(cx).weak_handle()
+                        }) {
+                            Ok(destination_workspace) => destination_workspace,
+                            Err(error) => {
+                                log::error!(
+                                    "failed to move dragged tab into target window: {error:#}"
+                                );
+                                return;
+                            }
+                        };
+
+                    Workspace::close_detached_window_if_empty(
+                        from_workspace,
+                        destination_workspace,
+                        cx,
+                    );
+                });
+            })
+            .log_err();
+    }
+
+    fn reattach_or_detach_dragged_tab_without_target_window(
+        &mut self,
+        dragged_tab: &DraggedTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let source_pane = dragged_tab.pane.clone();
+        let item_id = dragged_tab.item.item_id();
+
+        self.drag_split_direction = None;
+        self.workspace
+            .update(cx, |_, cx| {
+                cx.defer_in(window, move |workspace, window, cx| {
+                    if !workspace.reattach_item_to_source_window(
+                        source_pane.clone(),
+                        item_id,
+                        window,
+                        cx,
+                    ) {
+                        workspace.detach_item_from_pane(source_pane, item_id, window, cx);
+                    }
+                });
+            })
+            .log_err();
+    }
+
     pub fn handle_tab_drop(
         &mut self,
         dragged_tab: &DraggedTab,
@@ -4455,6 +4626,11 @@ impl Render for Pane {
             .size_full()
             .flex_none()
             .overflow_hidden()
+            .on_drag_move::<DraggedTab>(cx.listener(Self::track_tab_drag_for_detach))
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(Self::detach_tab_dragged_out_of_window),
+            )
             .on_action(cx.listener(|pane, split: &SplitLeft, window, cx| {
                 pane.split(SplitDirection::Left, split.mode, window, cx)
             }))
