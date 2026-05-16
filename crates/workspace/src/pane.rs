@@ -3892,10 +3892,16 @@ impl Pane {
             || cfg!(not(target_os = "macos")) && window.modifiers().control;
 
         let from_pane = dragged_tab.pane.clone();
+        let from_workspace = if from_pane == cx.entity() {
+            self.workspace.clone()
+        } else {
+            from_pane.read(cx).workspace.clone()
+        };
 
         self.workspace
             .update(cx, |_, cx| {
                 cx.defer_in(window, move |workspace, window, cx| {
+                    let destination_workspace = workspace.weak_handle();
                     if let Some(split_direction) = split_direction {
                         to_pane = workspace.split_pane(to_pane, split_direction, window, cx);
                     }
@@ -3961,6 +3967,11 @@ impl Pane {
                             }
                         }
                     });
+                    Workspace::close_detached_window_if_empty(
+                        from_workspace,
+                        destination_workspace,
+                        cx,
+                    );
                 });
             })
             .log_err();

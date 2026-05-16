@@ -6094,6 +6094,69 @@ impl Workspace {
         self.reattach_item_to_source_window(detached_pane, item_id, window, cx);
     }
 
+    pub(crate) fn close_detached_window_if_empty(
+        source_workspace: WeakEntity<Workspace>,
+        destination_workspace: WeakEntity<Workspace>,
+        cx: &mut App,
+    ) {
+        if source_workspace == destination_workspace {
+            return;
+        }
+
+        let Some(source_workspace) = source_workspace.upgrade() else {
+            return;
+        };
+
+        let should_close = source_workspace.read_with(cx, |workspace, cx| {
+            workspace.detached_from.is_some()
+                && workspace
+                    .panes()
+                    .iter()
+                    .all(|pane| pane.read(cx).items_len() == 0)
+        });
+
+        if !should_close {
+            return;
+        }
+
+        cx.defer(move |cx| {
+            let should_close = source_workspace.read_with(cx, |workspace, cx| {
+                workspace.detached_from.is_some()
+                    && workspace
+                        .panes()
+                        .iter()
+                        .all(|pane| pane.read(cx).items_len() == 0)
+            });
+
+            if !should_close {
+                return;
+            }
+
+            for window_handle in cx.windows() {
+                let Some(window_handle) = window_handle.downcast::<MultiWorkspace>() else {
+                    continue;
+                };
+                let removed = window_handle
+                    .update(cx, |multi_workspace, window, _cx| {
+                        if multi_workspace
+                            .workspaces()
+                            .any(|workspace| workspace == &source_workspace)
+                        {
+                            window.remove_window();
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+
+                if removed {
+                    break;
+                }
+            }
+        });
+    }
+
     pub fn bounding_box_for_pane(&self, pane: &Entity<Pane>) -> Option<Bounds<Pixels>> {
         self.center.bounding_box_for_pane(pane)
     }
