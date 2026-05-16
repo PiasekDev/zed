@@ -1134,9 +1134,9 @@ impl Item for Editor {
         }
 
         // The window-activation observer is bound to a specific window, so it
-        // has to follow the editor when it moves between windows (e.g. via
-        // `MoveActiveItemToNewWindow`). Replacing the field drops any prior
-        // subscription, keeping exactly one live observer per editor.
+        // has to follow the editor when it moves between windows. Replacing
+        // the field drops any prior subscription, keeping exactly one live
+        // observer per editor.
         self.show_mouse_cursor(cx);
         let blink_manager = self.blink_manager.clone();
         blink_manager.update(cx, |blink_manager, cx| {

@@ -1,5 +1,5 @@
 use crate::{
-    CloseWindow, MoveActiveItemToNewWindow, NewCenterTerminal, NewFile, NewTerminal,
+    CloseWindow, DetachActiveItem, NewCenterTerminal, NewFile, NewTerminal,
     OpenInTerminal, OpenOptions, OpenTerminal, OpenVisible, SplitDirection, ToggleFileFinder,
     ToggleProjectSymbols, ToggleZoom, Workspace, WorkspaceItemBuilder, ZoomIn, ZoomOut,
     focus_follows_mouse::FocusFollowsMouse as _,
@@ -3451,11 +3451,11 @@ impl Pane {
                         }
 
                         menu = menu.separator().entry(
-                            "Move to New Window",
-                            Some(MoveActiveItemToNewWindow.boxed_clone()),
+                            "Detach Item",
+                            Some(DetachActiveItem.boxed_clone()),
                             window.handler_for(&pane, move |pane, window, cx| {
                                 pane.activate_item(ix, true, true, window, cx);
-                                window.dispatch_action(MoveActiveItemToNewWindow.boxed_clone(), cx);
+                                window.dispatch_action(DetachActiveItem.boxed_clone(), cx);
                             }),
                         );
                     };

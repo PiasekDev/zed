@@ -427,14 +427,14 @@ actions!(
         FollowNextCollaborator,
         /// Moves the focused panel to the next position.
         MoveFocusedPanelToNextPosition,
-        /// Moves the active item out of its pane and into its own window.
+        /// Detaches the active item from its pane into its own window.
         ///
         /// Works for tabs in the center pane group and items inside dock panels
         /// (any panel whose `Panel::pane()` returns `Some`). The detached window
         /// is a normal `Workspace` sharing the same `Project`; state continuity
         /// comes from sharing the underlying `Entity<T>` directly.
-        MoveActiveItemToNewWindow,
-        /// In a window opened via `MoveActiveItemToNewWindow`, returns the
+        DetachActiveItem,
+        /// In a window opened via `DetachActiveItem`, returns the
         /// active item back to the source workspace's active pane and closes
         /// the detached window.
         ReattachActiveItemToSourceWindow,
@@ -1666,7 +1666,7 @@ pub struct Workspace {
     persisted_recent_navigation_history: Vec<PathBuf>,
     last_active_project_path: Option<ProjectPath>,
     restoring_workspace: bool,
-    /// Set when this workspace was opened by `MoveActiveItemToNewWindow`.
+    /// Set when this workspace was opened by `DetachActiveItem`.
     /// Reattach uses this to send the active item back to the source pane.
     detached_from: Option<DetachedFrom>,
 }
@@ -5944,7 +5944,7 @@ impl Workspace {
     /// `Workspace` sharing this workspace's `Project`; the item itself is moved
     /// (not cloned) and continues to share its underlying entity, so PTYs,
     /// buffers, and undo history are preserved.
-    pub fn move_active_item_to_new_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn detach_active_item(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let source_pane = self.focused_pane(window, cx);
         let Some(item) = source_pane.read(cx).active_item() else {
             return;
@@ -6004,7 +6004,7 @@ impl Workspace {
 
     /// Returns the active item to its source workspace and closes this window.
     /// Has no effect if this workspace was not opened via
-    /// `MoveActiveItemToNewWindow` or if the source no longer exists.
+    /// `DetachActiveItem` or if the source no longer exists.
     pub fn reattach_active_item_to_source_window(
         &mut self,
         window: &mut Window,
@@ -8314,11 +8314,9 @@ impl Workspace {
                     workspace.move_item_to_pane_in_direction(action, window, cx)
                 },
             ))
-            .on_action(
-                cx.listener(|workspace, _: &MoveActiveItemToNewWindow, window, cx| {
-                    workspace.move_active_item_to_new_window(window, cx);
-                }),
-            )
+            .on_action(cx.listener(|workspace, _: &DetachActiveItem, window, cx| {
+                workspace.detach_active_item(window, cx);
+            }))
             .on_action(cx.listener(
                 |workspace, _: &ReattachActiveItemToSourceWindow, window, cx| {
                     workspace.reattach_active_item_to_source_window(window, cx);
@@ -20185,7 +20183,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_move_active_item_to_new_window(cx: &mut TestAppContext) {
+    async fn test_detach_active_item(cx: &mut TestAppContext) {
         init_test(cx);
 
         let fs = FakeFs::new(cx.executor());
@@ -20200,7 +20198,7 @@ mod tests {
         });
 
         workspace.update_in(cx, |workspace, window, cx| {
-            workspace.move_active_item_to_new_window(window, cx);
+            workspace.detach_active_item(window, cx);
         });
         cx.run_until_parked();
 
@@ -20253,7 +20251,7 @@ mod tests {
         });
 
         workspace.update_in(cx, |workspace, window, cx| {
-            workspace.move_active_item_to_new_window(window, cx);
+            workspace.detach_active_item(window, cx);
         });
         cx.run_until_parked();
 
