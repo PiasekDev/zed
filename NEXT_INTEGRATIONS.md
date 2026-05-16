@@ -55,7 +55,7 @@ rebases on `next-base`.
 | --- | --- | --- | --- | --- | --- | --- |
 | `integration/46478-search-modal` | `pr/46478-search-modal` | [zed-industries/zed#46478](https://github.com/zed-industries/zed/pull/46478) | `ozacod` | `54e639eab83a9a2315be9a68d084c94effa68001` | Adds a search modal for project-wide text search. | `git merge --no-ff integration/46478-search-modal -m "Merge search modal integration into next"` |
 | `integration/55404-detachable-items` | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Adds detachable editor items, with local drag-out/reattach behavior and maximized detached windows. | `git merge --no-ff integration/55404-detachable-items -m "Merge detachable item integration into next"` |
-| `integration/firatoezcan-git-ui` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `eec3b368a7f738e184ace3892b1c52c4f9bcf825` | Adds Git panel single-file diff/history improvements, with local defaults and staged/unstaged fixes. | `git merge --no-ff integration/firatoezcan-git-ui -m "Merge firatoezcan Git UI integration into next"` |
+| `integration/firatoezcan-git-ui` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908c4b4e1d8e7cbb0ca669e68d511314a3` | Adds Git panel single-file diff/history improvements, with local defaults and staged/unstaged fixes. | `git merge --no-ff integration/firatoezcan-git-ui -m "Merge firatoezcan Git UI integration into next"` |
 | `integration/28674-tailwind-rust-completion` | `pr/28674-tailwind-rust-completion` | [zed-industries/zed#28674](https://github.com/zed-industries/zed/pull/28674) | `I-Info` | `19a316e2b359c1bfaa2cff1af1c57581df76bd5d` | Enables Tailwind CSS completions in Rust string contexts. | `git merge --no-ff integration/28674-tailwind-rust-completion -m "Merge Tailwind Rust completion integration into next"` |
 
 ### Integration Branch Maintenance
@@ -84,14 +84,15 @@ When creating a new adapted integration branch:
 
 ```sh
 git switch -C integration/<number>-<short-name> next-base
-git merge --no-ff --no-commit pr/<number>-<short-name>
-# Resolve conflicts and apply compatibility fixes.
-git commit -m "Adapt <short description> PR for next"
+git merge --squash --no-commit pr/<number>-<short-name>
+# Resolve mechanical conflicts needed to apply the source on next-base.
+git commit -m "Import <short description> source snapshot for next"
+# Add local fork behavior changes as named follow-up commits.
 ```
 
-Include source attribution in the integration commit body. Do not include
-GitHub autolinks such as `owner/repo#123`, `#123`, or full pull request URLs in
-commit messages, because GitHub creates timeline references on the upstream PR.
+Include source attribution in the import commit body. Do not include GitHub
+autolinks such as `owner/repo#123`, `#123`, or full pull request URLs in commit
+messages, because GitHub creates timeline references on the upstream PR.
 
 ```text
 Upstream-repository: zed-industries/zed
@@ -102,28 +103,26 @@ Snapshot: <raw-pr-head-sha>
 
 ### Layered Integration Workflow
 
-For future integrations, prefer a layered branch history:
+Integration branches should use a layered branch history:
 
 1. Keep the raw source snapshot untouched as `pr/<number>-<short-name>` for
    upstream PRs or `external/<owner>-<short-name>` for external forks.
 2. Create the adapted integration branch from `next-base`.
-3. Import the source as its own commit or merge commit with minimal conflict
-   resolution.
-4. Add local fork tailoring as follow-up commits.
+3. Import the source as its own commit or merge commit, including only the
+   mechanical conflict resolution needed to apply it to current `next-base`.
+4. Add compatibility fixes or local fork tailoring as named follow-up commits.
 5. Merge the adapted integration branch into `next`.
 
-This keeps the raw source, compatibility work, and personal tailoring easy to
-inspect separately. Useful inspection commands:
+This keeps the raw source, mechanical conflict resolution, compatibility work,
+and personal tailoring easy to inspect separately. Useful inspection commands:
 
 ```sh
 git log --oneline <raw-source-branch>..integration/<short-name>
 git diff <import-commit>..integration/<short-name>
 ```
 
-Some current integration branches are cleanly based on `next-base`, but still
-keep the source extraction, conflict resolution, and local adaptations in one
-adapted commit. TODO: optionally split existing integration branches into
-layered import/adaptation commits during a future cleanup pass.
+The current integration branches follow this shape. A branch may have only an
+import commit when there are no local behavior changes to separate.
 
 ## Raw Upstream PR Snapshot Branches
 
