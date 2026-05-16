@@ -5949,7 +5949,24 @@ impl Workspace {
         let Some(item) = source_pane.read(cx).active_item() else {
             return;
         };
-        let item_id = item.item_id();
+        self.detach_item_from_pane(source_pane, item.item_id(), window, cx);
+    }
+
+    pub(crate) fn detach_item_from_pane(
+        &mut self,
+        source_pane: Entity<Pane>,
+        item_id: EntityId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(item) = source_pane
+            .read(cx)
+            .items()
+            .find(|item| item.item_id() == item_id)
+            .map(|item| item.boxed_clone())
+        else {
+            return;
+        };
         let project = self.project.clone();
         let app_state = self.app_state.clone();
         let detached_from = DetachedFrom {
@@ -5962,10 +5979,16 @@ impl Workspace {
         // which means the source workspace is currently borrowed. Building a new
         // window synchronously here would paint before `Pane::AddItem` events
         // are dispatched, so any element on the moved item would still see the
-        // source workspace as its owner — and reading it would double-lease.
+        // source workspace as its owner, and reading it would double-lease.
         // Defer the whole transfer until the current update completes.
         window.defer(cx, move |window, cx| {
-            let options = (app_state.build_window_options)(None, cx);
+            let mut options = (app_state.build_window_options)(None, cx);
+            if !cfg!(test) {
+                options.window_bounds = Some(WindowBounds::Maximized(Bounds::maximized(
+                    options.display_id,
+                    cx,
+                )));
+            }
             let result = cx.open_window(options, {
                 let item = item.boxed_clone();
                 move |window, cx| {
