@@ -20,3 +20,8 @@ collapsed_placeholder = " /* ... */ "
 debuggers = ["CodeLLDB", "GDB"]
 block_comment = { start = "/*", prefix = "* ", end = "*/", tab_size = 1 }
 documentation_comment = { start = "/*", prefix = "* ", end = "*/", tab_size = 1 }
+scope_opt_in_language_servers = ["tailwindcss-language-server"]
+
+[overrides.string]
+completion_query_characters = ["-", "."]
+opt_into_language_servers = ["tailwindcss-language-server"]
