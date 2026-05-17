@@ -30,6 +30,8 @@ use util::command::new_command;
 use workspace::Workspace;
 
 const SHOULD_SHOW_UPDATE_NOTIFICATION_KEY: &str = "auto-updater-should-show-updated-notification";
+const ZED_NEXT_RELEASE_BASE_URL: &str =
+    "https://github.com/PiasekDev/zed/releases/download/zed-next";
 
 #[derive(Debug)]
 struct MissingDependencyError(String);
@@ -176,6 +178,28 @@ pub struct AutoUpdater {
 pub struct ReleaseAsset {
     pub version: String,
     pub url: String,
+}
+
+fn zed_next_remote_server_release_asset(
+    release_channel: ReleaseChannel,
+    version: Option<&Version>,
+    asset: &str,
+    os: &str,
+    arch: &str,
+) -> Option<ReleaseAsset> {
+    if release_channel != ReleaseChannel::Stable
+        || asset != "zed-remote-server"
+        || os != "linux"
+        || !matches!(arch, "x86_64" | "aarch64")
+    {
+        return None;
+    }
+
+    let version = version?.to_string();
+    Some(ReleaseAsset {
+        version,
+        url: format!("{ZED_NEXT_RELEASE_BASE_URL}/zed-remote-server-{os}-{arch}.gz"),
+    })
 }
 
 struct MacOsUnmounter<'a> {
@@ -600,6 +624,12 @@ impl AutoUpdater {
         arch: &str,
         cx: &mut AsyncApp,
     ) -> Result<ReleaseAsset> {
+        if let Some(release) =
+            zed_next_remote_server_release_asset(release_channel, version.as_ref(), asset, os, arch)
+        {
+            return Ok(release);
+        }
+
         let client = this.read_with(cx, |this, _| this.client.clone());
 
         let (system_id, metrics_id, is_staff) = if client.telemetry().metrics_enabled() {
@@ -1175,12 +1205,43 @@ mod tests {
     };
     use tempfile::tempdir;
 
+    use super::*;
+
     #[ctor::ctor]
     fn init_logger() {
         zlog::init_test();
     }
 
-    use super::*;
+    #[test]
+    fn test_zed_next_remote_server_release_asset_uses_github_release() {
+        let version =
+            semver::Version::parse("1.4.0+stable.123.abcdef").expect("test version should parse");
+        let release = zed_next_remote_server_release_asset(
+            ReleaseChannel::Stable,
+            Some(&version),
+            "zed-remote-server",
+            "linux",
+            "aarch64",
+        )
+        .expect("linux aarch64 remote server asset should use zed-next release");
+
+        assert_eq!(release.version, "1.4.0+stable.123.abcdef");
+        assert_eq!(
+            release.url,
+            "https://github.com/PiasekDev/zed/releases/download/zed-next/zed-remote-server-linux-aarch64.gz"
+        );
+
+        assert!(
+            zed_next_remote_server_release_asset(
+                ReleaseChannel::Stable,
+                Some(&version),
+                "zed",
+                "linux",
+                "aarch64",
+            )
+            .is_none()
+        );
+    }
 
     pub(super) struct InstallOverride(pub Rc<dyn Fn(&Path, &AsyncApp) -> Result<Option<PathBuf>>>);
     impl Global for InstallOverride {}

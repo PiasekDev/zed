@@ -112,20 +112,67 @@ GitHub Actions publishes a moving prerelease named `zed-next` containing:
 
 - `zed-linux-x86_64.tar.gz`
 - `zed-remote-server-linux-x86_64.gz`
+- `zed-remote-server-linux-aarch64.gz`
 - `zed-next-SHA256SUMS.txt`
 - `zed-next-version`
 
 The binary Arch package reads `zed-next-version` so the package version follows
 the Zed crate version and commit SHA instead of hard-coding a Zed version.
 
-The workflow builds the app for glibc Linux and the remote server for musl. Keep
+The workflow builds the app for glibc Linux and remote servers for musl. Keep
 the musl target-specific compiler settings in `.github/workflows/zed_next.yml`;
 using the host glibc compiler for native C dependencies can make the static
-musl remote server fail to link. The workflow also enables `sccache` with the
-GitHub Actions cache backend through `mozilla-actions/sccache-action` and caches
-Cargo registry/git sources to make repeated builds faster. Do not set
-`SCCACHE_GHA_ENABLED` and `RUSTC_WRAPPER` before that action runs; raw `sccache`
-needs the GitHub Actions cache URL and runtime token that the action exposes.
+musl remote server fail to link. The x86_64 remote server is built by the Linux
+bundle job. The aarch64 remote server is built by a separate native ARM GitHub
+Actions job and published into the same moving release. The workflow also
+enables `sccache` with the GitHub Actions cache backend through
+`mozilla-actions/sccache-action` and caches Cargo registry/git sources to make
+repeated builds faster. Do not set `SCCACHE_GHA_ENABLED` and `RUSTC_WRAPPER`
+before that action runs; raw `sccache` needs the GitHub Actions cache URL and
+runtime token that the action exposes.
+
+## Remote Server Assets
+
+This fork owns remote server distribution for replacement builds. Linux remote
+bootstrap resolves `zed-remote-server-linux-x86_64.gz` and
+`zed-remote-server-linux-aarch64.gz` from the fork's moving GitHub release:
+
+```text
+https://github.com/PiasekDev/zed/releases/download/zed-next/
+```
+
+The local cache version remains the full app version, including build metadata,
+so each pushed `next` build gets its own remote-server cache entry. Official Zed
+Cloud release lookup is intentionally bypassed for these Linux remote-server
+assets because a `main`-tracking fork can be ahead of the official stable
+release assets.
+
+If remote bootstrap fails and a manual recovery is needed, place a matching
+remote server binary in `~/.zed_server` on the remote host using the path shown
+by the connection error or logs. This should be temporary; the normal path is to
+publish the matching asset through the `zed_next` workflow.
+
+## Commit Authorship
+
+Personal patch branches should stay signed by Maciej and should not be rewritten
+by agents unless explicitly requested. Agent-created infrastructure and
+integration commits are usually committed with signing disabled to avoid
+YubiKey prompts:
+
+```sh
+git -c commit.gpgsign=false commit ...
+git -c commit.gpgsign=false rebase ...
+```
+
+When an agent creates or rewrites such commits, include this trailer:
+
+```text
+Co-authored-by: Codex <codex@openai.com>
+```
+
+Use the same trailer for follow-up fixup commits, amended commits, and rewritten
+integration-branch commits. Merge commits on `next` can remain simple merge
+markers.
 
 ## Installing
 
@@ -178,8 +225,10 @@ When asked to update this fork:
 
 1. Read this file.
 2. Fetch `upstream` and `origin`.
-3. Rebase `next-base` on `upstream/main`.
-4. Rebase personal patch branches on `upstream/main`.
+3. Rebase `next-base` on `upstream/main`, using unsigned agent commits with the
+   Codex co-author trailer for agent-authored changes.
+4. Ask Maciej to rebase personal patch branches on `upstream/main` when those
+   commits should remain signed by him.
 5. Recreate `next` from `next-base`.
 6. Merge the branches listed in `NEXT_INTEGRATIONS.md` in order.
 7. Fetch any requested upstream PR branches as `pr/<number>-<name>`.
