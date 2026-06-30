@@ -4724,6 +4724,7 @@ fn window_and_layout_page() -> SettingsPage {
                 title: "Scroll To Switch Tabs",
                 description: "Switch tabs when scrolling vertically over the tab bar.",
                 field: Box::new(SettingField {
+                    organization_override: None,
                     json_path: Some("tab_bar.scroll_to_switch_tabs"),
                     pick: |settings_content| {
                         settings_content
