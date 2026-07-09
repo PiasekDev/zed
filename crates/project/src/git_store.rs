@@ -7220,6 +7220,56 @@ impl Repository {
         })
     }
 
+    pub fn file_history_shas(
+        &mut self,
+        repo_path: RepoPath,
+        limit: Option<usize>,
+    ) -> oneshot::Receiver<Result<Vec<Oid>>> {
+        let repository_id = self.id;
+        self.send_job("file_history_shas", None, move |git_repo, _cx| async move {
+            match git_repo {
+                RepositoryState::Local(LocalRepositoryState { backend, .. }) => {
+                    let (sender, receiver) =
+                        async_channel::unbounded::<Vec<Arc<InitialGraphCommitData>>>();
+                    backend
+                        .initial_graph_data(LogSource::Path(repo_path), LogOrder::DateOrder, sender)
+                        .await?;
+
+                    let mut shas = Vec::new();
+                    while let Ok(commits) = receiver.try_recv() {
+                        for commit in commits {
+                            shas.push(commit.sha);
+                            if limit.is_some_and(|limit| shas.len() >= limit) {
+                                return Ok(shas);
+                            }
+                        }
+                    }
+                    Ok(shas)
+                }
+                RepositoryState::Remote(RemoteRepositoryState { project_id, client }) => {
+                    let mut responses = client
+                        .request_stream(proto::GetInitialGraphData {
+                            project_id: project_id.to_proto(),
+                            repository_id: repository_id.to_proto(),
+                            log_source: Some(log_source_to_proto(&LogSource::Path(repo_path))),
+                            log_order: log_order_to_proto(LogOrder::DateOrder),
+                        })
+                        .await?;
+                    let mut shas = Vec::new();
+                    while let Some(response) = responses.next().await {
+                        for commit in response?.commits {
+                            shas.push(initial_graph_commit_from_proto(commit)?.sha);
+                            if limit.is_some_and(|limit| shas.len() >= limit) {
+                                return Ok(shas);
+                            }
+                        }
+                    }
+                    Ok(shas)
+                }
+            }
+        })
+    }
+
     pub fn file_history_changed_files(
         &mut self,
         paths: Vec<RepoPath>,

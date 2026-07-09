@@ -88,6 +88,7 @@ pub struct CommitView {
     is_shallow_boundary: bool,
     file_filter: Option<RepoPath>,
     _load_diff_task: Task<Result<()>>,
+    file_filter: Option<RepoPath>,
 }
 
 pub(crate) struct GitBlob {
@@ -240,6 +241,7 @@ impl CommitView {
                         let project = workspace.project();
                         let workspace_entity = cx.entity();
                         let workspace_handle = cx.weak_entity();
+                        let dedup_filter = file_filter.clone();
                         let commit_view = cx.new(|cx| {
                             CommitView::new(
                                 commit_details,
@@ -257,24 +259,20 @@ impl CommitView {
 
                         let pane = workspace.active_pane();
                         pane.update(cx, |pane, cx| {
-                            let ix = pane.items().position(|item| {
-                                let commit_view = item.downcast::<CommitView>();
-                                commit_view
-                                    .is_some_and(|view| view.read(cx).commit.sha == commit_sha)
+                            let existing = pane.items().enumerate().find_map(|(index, item)| {
+                                let view = item.downcast::<CommitView>()?;
+                                let view_state = view.read(cx);
+                                (view_state.commit.sha == commit_sha
+                                    && view_state.file_filter == dedup_filter)
+                                    .then_some((index, view))
                             });
-                            if let Some(ix) = ix {
-                                let existing = pane
-                                    .items()
-                                    .filter_map(|item| item.downcast::<CommitView>())
-                                    .find(|view| view.read(cx).commit.sha == commit_sha)
-                                    .unwrap();
-
+                            if let Some((index, existing)) = existing {
                                 pane.remove_item(existing.item_id(), false, false, window, cx);
                                 pane.add_item(
                                     Box::new(commit_view),
                                     true,
                                     true,
-                                    Some(ix),
+                                    Some(index),
                                     window,
                                     cx,
                                 );
@@ -528,6 +526,7 @@ impl CommitView {
             is_shallow_boundary,
             file_filter,
             _load_diff_task: load_diff_task,
+            file_filter,
         }
     }
 
@@ -1375,6 +1374,7 @@ impl Item for CommitView {
                 is_shallow_boundary: self.is_shallow_boundary,
                 file_filter: self.file_filter.clone(),
                 _load_diff_task: Task::ready(Ok(())),
+                file_filter: self.file_filter.clone(),
             }
         })))
     }
@@ -1424,6 +1424,9 @@ impl Render for CommitViewToolbar {
         let (additions, deletions) = commit_view_ref.calculate_changed_lines(cx);
 
         let commit_sha = commit_view_ref.commit.sha.clone();
+        let file_filter = commit_view_ref.file_filter.clone();
+        let repository = commit_view_ref.repository.clone();
+        let workspace = commit_view_ref.workspace.clone();
 
         let remote_info = commit_view_ref.remote.as_ref().map(|remote| {
             let provider = remote.host.name();
@@ -1443,6 +1446,48 @@ impl Render for CommitViewToolbar {
 
         h_flex()
             .gap_1()
+            .when_some(file_filter, |this, file_filter| {
+                let older_repository = repository.clone();
+                let older_workspace = workspace.clone();
+                let older_file = file_filter.clone();
+                let older_sha = commit_sha.clone();
+                let newer_repository = repository.clone();
+                let newer_workspace = workspace.clone();
+                let newer_sha = commit_sha.clone();
+                this.child(
+                    IconButton::new("file-history-older", IconName::ArrowLeft)
+                        .icon_size(IconSize::Small)
+                        .tooltip(Tooltip::text("Previous commit for this file"))
+                        .on_click(move |_, window, cx| {
+                            navigate_file_history(
+                                older_repository.clone(),
+                                older_file.clone(),
+                                older_sha.clone(),
+                                older_workspace.clone(),
+                                FileHistoryDirection::Older,
+                                window,
+                                cx,
+                            );
+                        }),
+                )
+                .child(
+                    IconButton::new("file-history-newer", IconName::ArrowRight)
+                        .icon_size(IconSize::Small)
+                        .tooltip(Tooltip::text("Next commit for this file"))
+                        .on_click(move |_, window, cx| {
+                            navigate_file_history(
+                                newer_repository.clone(),
+                                file_filter.clone(),
+                                newer_sha.clone(),
+                                newer_workspace.clone(),
+                                FileHistoryDirection::Newer,
+                                window,
+                                cx,
+                            );
+                        }),
+                )
+                .child(Divider::vertical())
+            })
             .when(additions > 0 || deletions > 0, |this| {
                 this.child(
                     h_flex()
@@ -1520,6 +1565,63 @@ impl ToolbarItemView for CommitViewToolbar {
         _cx: &mut Context<Self>,
     ) {
     }
+}
+
+#[derive(Clone, Copy)]
+enum FileHistoryDirection {
+    Older,
+    Newer,
+}
+
+fn navigate_file_history(
+    repository: Entity<Repository>,
+    file_path: RepoPath,
+    current_sha: SharedString,
+    workspace: WeakEntity<Workspace>,
+    direction: FileHistoryDirection,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let history = repository.update(cx, |repository, _| {
+        repository.file_history_shas(file_path.clone(), None)
+    });
+    let repository = repository.downgrade();
+    let workspace_for_errors = workspace.clone();
+    window
+        .spawn(cx, async move |cx| {
+            let result: Result<()> = async {
+                let history = history.await.context("file history query was canceled")??;
+                let Some(current_index) = history
+                    .iter()
+                    .position(|sha| sha.to_string() == current_sha.as_ref())
+                else {
+                    return Ok(());
+                };
+                let target_index = match direction {
+                    FileHistoryDirection::Older => current_index.checked_add(1),
+                    FileHistoryDirection::Newer => current_index.checked_sub(1),
+                };
+                let Some(target_sha) = target_index.and_then(|index| history.get(index)) else {
+                    return Ok(());
+                };
+
+                cx.update(|window, cx| {
+                    CommitView::open(
+                        target_sha.to_string(),
+                        repository,
+                        workspace,
+                        None,
+                        Some(file_path),
+                        window,
+                        cx,
+                    );
+                })?;
+                Ok(())
+            }
+            .await;
+            result
+        })
+        .detach_and_notify_err(workspace_for_errors, window, cx);
 }
 
 fn stash_matches_index(sha: &str, stash_index: usize, repo: &Repository) -> bool {
