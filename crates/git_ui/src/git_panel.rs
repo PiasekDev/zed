@@ -8361,6 +8361,36 @@ impl GitPanel {
                     ))
                 })
             })
+            .when(!is_deleted, |el| {
+                let open_file_id: ElementId = ElementId::Name(format!("open_file_{}", ix).into());
+                let open_file_button_id: ElementId =
+                    ElementId::Name(format!("open_file_button_{}", ix).into());
+                let this = cx.weak_entity();
+                el.child(
+                    div()
+                        .id(open_file_id)
+                        .flex_none()
+                        .occlude()
+                        .cursor_pointer()
+                        .child(
+                            IconButton::new(open_file_button_id, IconName::ArrowUpRight)
+                                .shape(ui::IconButtonShape::Square)
+                                .icon_size(IconSize::Small)
+                                .icon_color(Color::Muted)
+                                .tooltip(|_window, cx| {
+                                    Tooltip::for_action("View File", &ViewFile, cx)
+                                })
+                                .on_click(move |_, window, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.selected_entry = Some(ix);
+                                        this.view_file(&ViewFile, window, cx);
+                                        cx.stop_propagation();
+                                    })
+                                    .ok();
+                                }),
+                        ),
+                )
+            })
             .child(
                 div()
                     .id(checkbox_wrapper_id)
