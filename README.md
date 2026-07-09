@@ -1,48 +1,72 @@
-# Zed
+# Zed Next
 
-[![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
-[![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
+This is a personal downstream build of [Zed](https://github.com/zed-industries/zed)
+maintained by [PiasekDev](https://github.com/PiasekDev).
 
-Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
+This is not an official Zed build. For the upstream editor, documentation, and
+issue tracker, use:
 
----
+- Upstream repository: https://github.com/zed-industries/zed
+- Zed website: https://zed.dev
+- Zed docs: https://zed.dev/docs
 
-### Installation
+## Branches
 
-On macOS, Linux, and Windows you can [download Zed directly](https://zed.dev/download) or install Zed via your local package manager ([macOS](https://zed.dev/docs/installation#macos)/[Linux](https://zed.dev/docs/linux#installing-via-a-package-manager)/[Windows](https://zed.dev/docs/windows#package-managers)).
+- `next-base`: fork infrastructure, packaging, release workflow, and fork docs.
+- `next`: daily-driver build branch. It starts from `next-base`, then uses one
+  assembly merge for personal patch branches and selected upstream PR branches.
+- `scroll-to-switch-tabs`: personal patch branch currently included in `next`.
+- `pr/<number>-<short-name>`: raw local snapshots of upstream Zed PRs.
+- `integration/<number>-<short-name>`: adapted PR branches that carry local
+  conflict resolutions or compatibility fixes.
 
-Other platforms are not yet available:
+See [FORK_NEXT.md](./FORK_NEXT.md) for the full branch, update, and release
+workflow. See [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md) for the current
+patch/PR integration manifest used to rebuild `next`.
 
-- Web ([tracking discussion](https://github.com/zed-industries/zed/discussions/26195))
+## Installing
 
-### Developing Zed
+Install the GitHub-built Arch package:
 
-- [Building Zed for macOS](./docs/src/development/macos.md)
-- [Building Zed for Linux](./docs/src/development/linux.md)
-- [Building Zed for Windows](./docs/src/development/windows.md)
+```sh
+cd packaging/arch/zed-next-bin
+makepkg -Csi
+```
 
-### Contributing
+Build from this checkout and install through pacman:
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.
+```sh
+script/package-zed-next-local
+```
 
-Also... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.
+Package an already-built local bundle:
 
-### Licensing
+```sh
+script/package-zed-next-local --no-build
+```
 
-Zed source code is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components where marked.
+Clean source build through makepkg:
 
-License information for third party dependencies must be correctly provided for CI to pass.
+```sh
+cd packaging/arch/zed-next-git
+makepkg -Csi
+```
 
-We use [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to automatically comply with open source licenses. If CI is failing, check the following:
+All replacement builds disable upstream auto-update and point update behavior
+back to this fork/package flow.
 
-- Is it showing a `no license specified` error for a crate you've created? If so, add `publish = false` under `[package]` in your crate's Cargo.toml.
-- Is the error `failed to satisfy license requirements` for a dependency? If so, first determine what license the project has and whether this system is sufficient to comply with this license's requirements. If you're unsure, ask a lawyer. Once you've verified that this system is acceptable add the license's SPDX identifier to the `accepted` array in `script/licenses/zed-licenses.toml`.
-- Is `cargo-about` unable to find the license for a dependency? If so, add a clarification field at the end of `script/licenses/zed-licenses.toml`, as specified in the [cargo-about book](https://embarkstudios.github.io/cargo-about/cli/generate/config.html#crate-configuration).
+## Building
 
-## Sponsorship
+Pushing `next` to this fork starts the `zed_next` GitHub Actions workflow, which
+publishes a moving prerelease named `zed-next`.
 
-Zed is developed by **Zed Industries, Inc.**, a for-profit company.
+Do not push `next` until all intended personal patches and upstream PR branches
+for that build have been merged locally.
 
-If you’d like to financially support the project, you can do so via GitHub Sponsors.
-Sponsorships go directly to Zed Industries and are used as general company revenue.
-There are no perks or entitlements associated with sponsorship.
+## Licensing
+
+Zed source code is licensed primarily under GPL-3.0-or-later, with Apache-2.0
+components where marked.
+
+License information for third party dependencies must be correctly provided for
+CI to pass.
