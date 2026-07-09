@@ -1,0 +1,213 @@
+name: zed_next
+
+on:
+  push:
+    branches:
+      - next
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zed-next-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  RELEASE_CHANNEL: stable
+  ZED_RELEASE_CHANNEL: stable
+  ZED_UPDATE_EXPLANATION: "Update this PiasekDev Zed build from the zed-next-bin package."
+
+jobs:
+  bundle_linux_x86_64:
+    name: Bundle Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CC: clang
+      CXX: clang++
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache Cargo registry and git sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-sources-linux-x86_64-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-sources-linux-x86_64-
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+        with:
+          version: "v0.10.0"
+
+      - name: Enable sccache
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+
+      - name: Use stable replacement channel
+        run: printf 'stable' > crates/zed/RELEASE_CHANNEL
+
+      - name: Install Linux dependencies
+        run: ./script/linux
+
+      - name: Download WASI SDK
+        run: ./script/download-wasi-sdk
+
+      - name: Bundle Zed
+        run: ./script/bundle-linux
+
+      - name: Write version metadata
+        run: |
+          version="$(script/get-crate-version zed)"
+          short_sha="$(git rev-parse --short HEAD)"
+          printf "%s.next.g%s\n" "$version" "$short_sha" > target/zed-next-version
+
+      - name: Prepare release artifacts
+        run: |
+          mkdir -p target/zed-next-artifacts
+          cp target/release/zed-linux-x86_64.tar.gz target/zed-next-artifacts/
+          cp target/zed-remote-server-linux-x86_64.gz target/zed-next-artifacts/
+          cp target/zed-next-version target/zed-next-artifacts/
+
+      - name: Show sccache stats
+        if: always()
+        run: ${SCCACHE_PATH:-sccache} --show-stats || true
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-next-linux-x86_64
+          path: target/zed-next-artifacts/*
+          if-no-files-found: error
+
+  remote_server_linux_aarch64:
+    name: Remote server Linux aarch64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+      CC: clang
+      CXX: clang++
+      CC_aarch64_unknown_linux_musl: musl-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      RUSTFLAGS: "-C target-feature=+crt-static"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache Cargo registry and git sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-sources-linux-aarch64-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-sources-linux-aarch64-
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+        with:
+          version: "v0.10.0"
+
+      - name: Enable sccache
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+
+      - name: Use stable replacement channel
+        run: printf 'stable' > crates/zed/RELEASE_CHANNEL
+
+      - name: Install Linux dependencies
+        run: ./script/linux
+
+      - name: Build remote server
+        run: |
+          rustup target add aarch64-unknown-linux-musl
+          cargo build --release --target aarch64-unknown-linux-musl --package remote_server
+
+      - name: Package remote server
+        run: |
+          target_dir="$(cargo metadata --format-version=1 --no-deps | tr ',' '\n' | sed -n 's/^"target_directory":"\([^"]*\)".*/\1/p')"
+          llvm-objcopy --strip-debug "${target_dir}/aarch64-unknown-linux-musl/release/remote_server"
+          mkdir -p "${target_dir}/zed-next-artifacts"
+          gzip -f --stdout --best "${target_dir}/aarch64-unknown-linux-musl/release/remote_server" > "${target_dir}/zed-next-artifacts/zed-remote-server-linux-aarch64.gz"
+
+      - name: Show sccache stats
+        if: always()
+        run: ${SCCACHE_PATH:-sccache} --show-stats || true
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-next-remote-server-linux-aarch64
+          path: target/zed-next-artifacts/*
+          if-no-files-found: error
+
+  publish_zed_next:
+    name: Publish zed-next release
+    if: github.event_name == 'push'
+    needs:
+      - bundle_linux_x86_64
+      - remote_server_linux_aarch64
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Write checksums
+        run: |
+          cd release-artifacts
+          sha256sum \
+            zed-linux-x86_64.tar.gz \
+            zed-remote-server-linux-x86_64.gz \
+            zed-remote-server-linux-aarch64.gz \
+            > zed-next-SHA256SUMS.txt
+
+      - name: Publish moving zed-next release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=zed-next
+          short_sha="$(git rev-parse --short HEAD)"
+
+          gh release delete "$tag" --yes --cleanup-tag || true
+          git push origin ":refs/tags/$tag" || true
+          git tag --delete "$tag" || true
+
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "Zed Next ${short_sha}" \
+            --notes "Replacement Linux x86_64 build from branch \`next\` at ${GITHUB_SHA}." \
+            --prerelease \
+            release-artifacts/zed-linux-x86_64.tar.gz \
+            release-artifacts/zed-remote-server-linux-x86_64.gz \
+            release-artifacts/zed-remote-server-linux-aarch64.gz \
+            release-artifacts/zed-next-SHA256SUMS.txt \
+            release-artifacts/zed-next-version

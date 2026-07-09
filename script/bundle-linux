@@ -46,7 +46,11 @@ done
 export ZED_BUNDLE=true
 
 channel=$(<crates/zed/RELEASE_CHANNEL)
-target_dir="${CARGO_TARGET_DIR:-target}"
+target_dir="$(cargo metadata --format-version=1 --no-deps | tr ',' '\n' | sed -n 's/^"target_directory":"\([^"]*\)".*/\1/p')"
+if [[ -z "$target_dir" ]]; then
+    echo "Failed to determine Cargo target directory." >&2
+    exit 1
+fi
 
 version="$(script/get-crate-version zed)"
 # Set RELEASE_VERSION so it's compiled into GPUI and it knows about the version.

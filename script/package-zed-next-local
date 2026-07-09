@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  cat <<EOF
+Usage: ${0##*/} [--no-build] [--no-install]
+
+Builds the current checkout as a stable-channel Zed replacement, then packages
+the local release tarball with makepkg.
+
+Environment:
+  ZED_NEXT_TARGET_CPU   Rust target CPU to compile for. Defaults to native.
+                        Set to an empty value to avoid adding target-cpu.
+  RUSTFLAGS             Preserved and augmented with Zed's required rustflags.
+  REMOTE_SERVER_TARGET  Forwarded to script/bundle-linux.
+EOF
+}
+
+build=true
+install=true
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-build)
+      build=false
+      shift
+      ;;
+    --no-install)
+      install=false
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "script/package-zed-next-local currently only supports Linux." >&2
+  exit 1
+fi
+
+if ! command -v makepkg >/dev/null 2>&1; then
+  echo "makepkg is required to package the local build." >&2
+  exit 1
+fi
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_dir"
+
+release_channel_file="crates/zed/RELEASE_CHANNEL"
+previous_release_channel="$(cat "$release_channel_file")"
+
+restore_release_channel() {
+  printf "%s\n" "$previous_release_channel" > "$release_channel_file"
+}
+
+trap restore_release_channel EXIT
+
+export RELEASE_CHANNEL=stable
+export ZED_RELEASE_CHANNEL=stable
+export ZED_UPDATE_EXPLANATION="Update this PiasekDev Zed build with script/package-zed-next-local."
+
+remote_server_target="${REMOTE_SERVER_TARGET:-x86_64-unknown-linux-musl}"
+if [[ "$remote_server_target" == "x86_64-unknown-linux-musl" ]]; then
+  if ! command -v musl-gcc >/dev/null 2>&1; then
+    echo "musl-gcc is required to build the x86_64 musl remote server. Install the Arch musl package." >&2
+    exit 1
+  fi
+  export CC_x86_64_unknown_linux_musl="${CC_x86_64_unknown_linux_musl:-musl-gcc}"
+  export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="${CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER:-musl-gcc}"
+fi
+
+rustflags="${RUSTFLAGS:-}"
+
+if [[ " $rustflags " != *" symbol-mangling-version=v0 "* ]]; then
+  rustflags="${rustflags:+$rustflags }-C symbol-mangling-version=v0"
+fi
+
+if [[ " $rustflags " != *" --cfg tokio_unstable "* ]]; then
+  rustflags="${rustflags:+$rustflags }--cfg tokio_unstable"
+fi
+
+target_cpu="${ZED_NEXT_TARGET_CPU-native}"
+if [[ -n "$target_cpu" && " $rustflags " != *" target-cpu="* ]]; then
+  rustflags="${rustflags:+$rustflags }-C target-cpu=$target_cpu"
+fi
+
+export RUSTFLAGS="$rustflags"
+
+printf "stable\n" > "$release_channel_file"
+
+if [[ "$build" == true ]]; then
+  script/download-wasi-sdk
+  script/bundle-linux
+fi
+
+arch="$(uname -m)"
+target_dir="$(cargo metadata --format-version=1 --no-deps | tr ',' '\n' | sed -n 's/^"target_directory":"\([^"]*\)".*/\1/p')"
+if [[ -z "$target_dir" ]]; then
+  echo "Failed to determine Cargo target directory." >&2
+  exit 1
+fi
+archive="${target_dir}/release/zed-linux-${arch}.tar.gz"
+
+if [[ ! -f "$archive" ]]; then
+  echo "Missing local bundle: $archive" >&2
+  echo "Run ${0##*/} without --no-build first." >&2
+  exit 1
+fi
+
+export ZED_NEXT_BUNDLE_PATH="$(realpath "$archive")"
+
+makepkg_args=(-C -f -s)
+if [[ "$install" == true ]]; then
+  makepkg_args+=(-i)
+fi
+
+(
+  cd packaging/arch/zed-next-local
+  makepkg "${makepkg_args[@]}"
+)

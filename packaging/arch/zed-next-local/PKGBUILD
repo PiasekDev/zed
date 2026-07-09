@@ -1,0 +1,55 @@
+# Maintainer: PiasekDev
+
+pkgname=zed-next-local
+pkgver=0.next.local
+pkgrel=2
+pkgdesc="Personal local replacement build of Zed from this checkout"
+arch=('x86_64')
+url="https://github.com/PiasekDev/zed"
+license=('GPL-3.0-or-later')
+options=('!debug')
+depends=(
+  'alsa-lib'
+  'fontconfig'
+  'glib2'
+  'hicolor-icon-theme'
+  'libxcb'
+  'libxkbcommon'
+  'libxkbcommon-x11'
+  'openssl'
+  'sqlite'
+  'vulkan-icd-loader'
+  'wayland'
+  'zstd'
+)
+provides=('zed' 'zeditor')
+conflicts=('zed' 'zed-bin' 'zed-git' 'zed-next-bin' 'zed-next-git')
+
+_bundle_path="${ZED_NEXT_BUNDLE_PATH:-$startdir/../../../target/release/zed-linux-x86_64.tar.gz}"
+source=("zed-linux-x86_64.tar.gz::file://${_bundle_path}")
+sha256sums=('SKIP')
+
+pkgver() {
+  local repo_root
+  repo_root="$(realpath "$startdir/../../..")"
+  local zed_version
+  zed_version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$repo_root/crates/zed/Cargo.toml" | head -n 1)"
+  local revision
+  revision="$(git -C "$repo_root" rev-list --count HEAD)"
+  local commit
+  commit="$(git -C "$repo_root" rev-parse --short HEAD)"
+  printf "%s.next.local.r%s.g%s" "$zed_version" "$revision" "$commit"
+}
+
+package() {
+  install -dm755 "$pkgdir/usr/lib/zed" "$pkgdir/usr/bin" "$pkgdir/usr/share" "$pkgdir/usr/share/licenses/$pkgname"
+
+  cp -a "$srcdir/zed.app/bin" "$pkgdir/usr/lib/zed/"
+  cp -a "$srcdir/zed.app/lib" "$pkgdir/usr/lib/zed/"
+  cp -a "$srcdir/zed.app/libexec" "$pkgdir/usr/lib/zed/"
+  cp -a "$srcdir/zed.app/share/." "$pkgdir/usr/share/"
+  install -Dm644 "$srcdir/zed.app/licenses.md" "$pkgdir/usr/share/licenses/$pkgname/licenses.md"
+
+  ln -s /usr/lib/zed/bin/zed "$pkgdir/usr/bin/zed"
+  ln -s /usr/lib/zed/bin/zed "$pkgdir/usr/bin/zeditor"
+}

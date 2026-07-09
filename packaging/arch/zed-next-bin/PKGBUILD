@@ -1,0 +1,48 @@
+# Maintainer: PiasekDev
+
+pkgname=zed-next-bin
+pkgver=0.next.g0000000
+pkgrel=2
+pkgdesc="Personal replacement build of Zed from PiasekDev/zed next"
+arch=('x86_64')
+url="https://github.com/PiasekDev/zed"
+license=('GPL-3.0-or-later')
+options=('!debug')
+depends=(
+  'alsa-lib'
+  'fontconfig'
+  'glib2'
+  'hicolor-icon-theme'
+  'libxcb'
+  'libxkbcommon'
+  'libxkbcommon-x11'
+  'openssl'
+  'sqlite'
+  'vulkan-icd-loader'
+  'wayland'
+  'zstd'
+)
+provides=('zed' 'zeditor')
+conflicts=('zed' 'zed-bin' 'zed-git' 'zed-next-git' 'zed-next-local')
+source=(
+  "zed-linux-x86_64.tar.gz::https://github.com/PiasekDev/zed/releases/download/zed-next/zed-linux-x86_64.tar.gz"
+  "zed-next-version::https://github.com/PiasekDev/zed/releases/download/zed-next/zed-next-version"
+)
+sha256sums=('SKIP' 'SKIP')
+
+pkgver() {
+  tr -cd '[:alnum:]._' < "$srcdir/zed-next-version"
+}
+
+package() {
+  install -dm755 "$pkgdir/usr/lib/zed" "$pkgdir/usr/bin" "$pkgdir/usr/share" "$pkgdir/usr/share/licenses/$pkgname"
+
+  cp -a "$srcdir/zed.app/bin" "$pkgdir/usr/lib/zed/"
+  cp -a "$srcdir/zed.app/lib" "$pkgdir/usr/lib/zed/"
+  cp -a "$srcdir/zed.app/libexec" "$pkgdir/usr/lib/zed/"
+  cp -a "$srcdir/zed.app/share/." "$pkgdir/usr/share/"
+  install -Dm644 "$srcdir/zed.app/licenses.md" "$pkgdir/usr/share/licenses/$pkgname/licenses.md"
+
+  ln -s /usr/lib/zed/bin/zed "$pkgdir/usr/bin/zed"
+  ln -s /usr/lib/zed/bin/zed "$pkgdir/usr/bin/zeditor"
+}
