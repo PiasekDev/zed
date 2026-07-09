@@ -59,5 +59,23 @@ crates/docs_preprocessor/actions.json
 # NixOS integration test state
 .nixos-test-history
 
+# zed-next makepkg outputs
+/packaging/arch/zed-next-bin/pkg/
+/packaging/arch/zed-next-bin/src/
+/packaging/arch/zed-next-bin/*.pkg.tar.zst
+/packaging/arch/zed-next-bin/*.tar.gz
+/packaging/arch/zed-next-bin/zed-next-version
+/packaging/arch/zed-next-bin/*.log
+/packaging/arch/zed-next-git/pkg/
+/packaging/arch/zed-next-git/src/
+/packaging/arch/zed-next-git/*.pkg.tar.zst
+/packaging/arch/zed-next-git/*.tar.gz
+/packaging/arch/zed-next-git/*.log
+/packaging/arch/zed-next-local/pkg/
+/packaging/arch/zed-next-local/src/
+/packaging/arch/zed-next-local/*.pkg.tar.zst
+/packaging/arch/zed-next-local/*.tar.gz
+/packaging/arch/zed-next-local/*.log
+
 .local*
 .cache
