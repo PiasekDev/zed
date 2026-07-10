@@ -278,12 +278,36 @@ After promotion, the next scheduled run fast-forwards the live branch set
 (`next-base`, integrations) to what was promoted and pushes `origin/main` to
 mirror `upstream/main`.
 
+### Schedule
+
+The schedule lives as the Codex Desktop automation `zed-fork-refresh-proposal`
+(weekly, Friday 19:00 Europe/Warsaw). Manage it through a Codex Desktop
+thread using Codex's automation tool; it is not exposed via the Codex CLI or
+app-server API. This machine's scheduler has previously mispersisted
+`TZID=Europe/Warsaw` rules as UTC — after any schedule change, verify
+`next_run_at` in `~/.codex/sqlite/codex-dev.db` converts to the intended
+local time.
+
 ### Authentication
 
-Git pushes use HTTPS with the gh CLI credential helper (`gh auth setup-git`;
-`origin` push URL is HTTPS). No YubiKey and no separate PAT. The gh token
-lives in the desktop keyring, so headless runs outside the session will fail
-auth — this is accepted, not a bug to fix with a plaintext token.
+Git pushes use HTTPS with the gh CLI credential helper, configured
+**repo-locally only** — the rest of the machine stays on SSH with Maciej's
+hardware key, and this repository is the deliberate exception so agents and
+the automation can push without key touches. No separate PAT. To re-provision
+(new machine or new clone):
+
+```sh
+git remote set-url --push origin https://github.com/PiasekDev/zed.git
+git config credential."https://github.com".helper ''
+git config --add credential."https://github.com".helper '!/usr/bin/gh auth git-credential'
+```
+
+Do not run `gh auth setup-git` for this — it writes the helper into the
+global git config. The gh token needs the `workflow` scope
+(`gh auth refresh -h github.com -s workflow`) because pushes here routinely
+carry `.github/workflows/` changes. The token lives in the desktop keyring,
+so headless runs outside the desktop session will fail auth — this is
+accepted, not a bug to fix with a plaintext token.
 
 ## Installing
 
