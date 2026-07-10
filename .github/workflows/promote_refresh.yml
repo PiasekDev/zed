@@ -1,0 +1,58 @@
+name: promote_refresh
+
+# Promotes an approved refresh proposal: when the repo owner approves a PR
+# labeled refresh-proposal, force-push `next` to the proposal head and start
+# the zed_next build. Promotion is pure git plumbing — no agent involved.
+#
+# The push uses GITHUB_TOKEN, whose pushes deliberately do not trigger other
+# workflows, so the build is dispatched explicitly afterwards.
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: write
+
+jobs:
+  promote:
+    if: >
+      github.event.review.state == 'approved' &&
+      github.event.review.user.login == github.repository_owner &&
+      github.event.pull_request.base.ref == 'next' &&
+      startsWith(github.event.pull_request.head.ref, 'refresh/') &&
+      contains(github.event.pull_request.labels.*.name, 'refresh-proposal')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Force-push next to proposal head
+        run: |
+          git push --force origin "${{ github.event.pull_request.head.sha }}:refs/heads/next"
+
+      - name: Dispatch zed_next build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run zed_next.yml --repo "$GITHUB_REPOSITORY" --ref next
+
+      - name: Comment and clean up proposal branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "Promoted: \`next\` now points at ${{ github.event.pull_request.head.sha }}; zed_next build dispatched."
+          # The PR auto-closes as merged once next contains the head commits.
+          # Delete sibling proposal branches (refresh/<date>/*) for this proposal.
+          proposal_prefix="$(dirname "$HEAD_REF")"
+          for ref in $(git ls-remote --heads origin "${proposal_prefix}/*" | awk '{print $2}'); do
+            git push origin --delete "${ref#refs/heads/}" || true
+          done
