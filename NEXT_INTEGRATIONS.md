@@ -245,7 +245,10 @@ Import basis: PR head snapshot `035c1b6378f4f285167c0236b7b4621932e72b53`
    `index -> working tree`). Other groupings keep the default behavior.
 
 The group-by-staging view is enabled per-user via `settings.json`
-(`git_panel.group_by`), not by changing the upstream default in code.
+(`git_panel.group_by: "staging"`), not by changing the upstream default in
+code. The per-section per-file diff tailoring assumes
+`git_panel.entry_primary_click_action: "file_diff"`; both live in Maciej's
+dotfiles alongside `agent.commit_message_instructions` (his commit style).
 
 After changing the integration branch, run:
 
