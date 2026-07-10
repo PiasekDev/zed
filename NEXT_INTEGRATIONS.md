@@ -20,6 +20,7 @@ git merge --no-ff \
   integration/55404-detachable-items \
   integration/git-ui-improvements \
   integration/28674-tailwind-rust-completion \
+  integration/59884-group-by-staging \
   -m "Assemble next fork integrations"
 ```
 
@@ -34,9 +35,9 @@ Pushing `next` starts the GitHub Actions build.
 
 ## Custom Patch Branches
 
-| Branch | Source | Author | Purpose |
-| --- | --- | --- | --- |
-| `scroll-to-switch-tabs` | Local personal patch branch | Maciej Piasecki `<maciej@piasek.dev>` | Adds a setting and tab bar behavior for switching tabs with scroll input. |
+| Branch | Source | Author | Purpose | Upstream intent |
+| --- | --- | --- | --- | --- |
+| `scroll-to-switch-tabs` | Local personal patch branch | Maciej Piasecki `<maciej@piasek.dev>` | Adds a setting and tab bar behavior for switching tabs with scroll input. | Yes, after a fresh-angle rework and Maciej's personal testing; no upstream PR until he approves the code. |
 
 Custom patch branches should be rebased on `upstream/main` before rebuilding
 `next`:
@@ -57,11 +58,12 @@ Use adapted integration branches for upstream PRs that do not merge cleanly into
 attribution/source snapshot, then maintain an `integration/*` branch that
 rebases on `next-base`.
 
-| Branch | Raw Source Branch | Upstream PR | Upstream Author | Source Anchor | Purpose |
-| --- | --- | --- | --- | --- | --- |
-| `integration/55404-detachable-items` | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Adds detachable editor items, with local drag-out/reattach behavior and maximized detached windows. |
-| `integration/git-ui-improvements` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908006e3d206257239df57530b32418e0` | Integrates selected Git panel diff and file-history navigation behavior originally extracted from the Firat Ozcan fork, on top of upstream's current solo diff view. |
-| `integration/28674-tailwind-rust-completion` | `pr/28674-tailwind-rust-completion` | [zed-industries/zed#28674](https://github.com/zed-industries/zed/pull/28674) | `I-Info` | `19a316e2b359c1bfaa2cff1af1c57581df76bd5d` | Enables Tailwind CSS completions in Rust string contexts. |
+| Branch | Raw Source Branch | Upstream PR | Upstream Author | Source Anchor | Purpose | Retirement condition |
+| --- | --- | --- | --- | --- | --- | --- |
+| `integration/55404-detachable-items` | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Adds detachable editor items, with local drag-out/reattach behavior and maximized detached windows. | Upstream merges the PR or ships an equivalent detach/reattach feature. |
+| `integration/git-ui-improvements` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908006e3d206257239df57530b32418e0` | Per-entry view-file button and file-history commit navigation. Rebuilt 2026-07-10 at ~200 lines after upstream absorbed the rest (see Retired Integrations). | View-file button and in-view file-history navigation land upstream (watch issue 59761 and the upstream history views). |
+| `integration/28674-tailwind-rust-completion` | `pr/28674-tailwind-rust-completion` | [zed-industries/zed#28674](https://github.com/zed-industries/zed/pull/28674) | `I-Info` | `19a316e2b359c1bfaa2cff1af1c57581df76bd5d` | Enables Tailwind CSS completions in Rust string contexts. | Upstream registers Rust for Tailwind completions (the PR itself was closed unmerged). |
+| `integration/59884-group-by-staging` | `pr/59884-group-by-staging` | [zed-industries/zed#59884](https://github.com/zed-industries/zed/pull/59884) | `chirivelli` | `035c1b6378f4f285167c0236b7b4621932e72b53` | Group-by-staging panel view with +/- stage buttons; re-adds the PR's reverted per-section diff stats; fork tailoring opens per-file solo diffs against section bases (staged row: HEAD to index, unstaged row: index to worktree). | Upstream merges the PR; on merge, re-check whether the diff stats and the per-section solo diff behavior came with it, and keep only the missing tailoring. |
 
 `Source Anchor` is the immutable upstream or external revision used as the
 reference point for an integration. It may be a raw source branch tip, a
@@ -84,6 +86,10 @@ git push --force-with-lease origin integration/git-ui-improvements
 git switch integration/28674-tailwind-rust-completion
 git rebase next-base
 git push --force-with-lease origin integration/28674-tailwind-rust-completion
+
+git switch integration/59884-group-by-staging
+git rebase next-base
+git push --force-with-lease origin integration/59884-group-by-staging
 ```
 
 When creating a new adapted integration branch:
@@ -136,6 +142,7 @@ import commit when there are no local behavior changes to separate.
 | --- | --- | --- | --- | --- | --- |
 | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Raw upstream source snapshot for `integration/55404-detachable-items`. | Do not merge directly into `next`; merge the adapted `integration/55404-detachable-items` branch. |
 | `pr/28674-tailwind-rust-completion` | [zed-industries/zed#28674](https://github.com/zed-industries/zed/pull/28674) | `I-Info` | `19a316e2b359c1bfaa2cff1af1c57581df76bd5d` | Raw upstream source snapshot for `integration/28674-tailwind-rust-completion`. | Do not merge directly into `next`; merge the adapted `integration/28674-tailwind-rust-completion` branch. |
+| `pr/59884-group-by-staging` | [zed-industries/zed#59884](https://github.com/zed-industries/zed/pull/59884) | `chirivelli` | `035c1b6378f4f285167c0236b7b4621932e72b53` | Raw upstream source snapshot for `integration/59884-group-by-staging`. | Do not merge directly into `next`; merge the adapted `integration/59884-group-by-staging` branch. |
 
 ## Raw External Fork Snapshot Branches
 
@@ -144,7 +151,22 @@ import commit when there are no local behavior changes to separate.
 | `external/firatoezcan-main` | `firatoezcan/zed`, branch `main` | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908006e3d206257239df57530b32418e0` | Raw external fork snapshot used as source material for `integration/git-ui-improvements`. | Do not merge directly into `next`; merge the adapted `integration/git-ui-improvements` branch. |
 | `external/firatoezcan-git-ui-improvements` | `firatoezcan/zed`, branch `autoresearch/git-ui-improvements-2026-04-04` | Firat Ozcan `<admin@firatoezcan.com>` | `8ae6296bb0790506f53b3c2022429a9bb705b4d2` | Raw external exploratory branch retained as source/reference material. | Do not merge directly into `next`. |
 
-### Retired Search Modal Integration
+### Retired Integrations
+
+#### Precise-Base Staging Diffs (absorbed by upstream PR 46541)
+
+Until 2026-07-10 `integration/git-ui-improvements` also carried staging-aware
+panel sections, solo-diff click routing, and hand-rolled staged/unstaged diff
+base plumbing. Upstream absorbed that scope: PR 46541 (`c31b2b0dc7`) added
+staged/unstaged diff views and the general `DiffBase` machinery, and
+`git_panel.entry_primary_click_action` covers click routing. The branch was
+rebuilt to keep only the view-file button and file-history navigation; the
+per-section per-file diff behavior was reimplemented as fork tailoring on
+`integration/59884-group-by-staging` on top of upstream `DiffBase` (the old
+hand-rolled version had a hunk-toggle duplication bug, now pinned by a
+regression test on that branch).
+
+#### Retired Search Modal Integration
 
 The previous `integration/46478-search-modal` branch is no longer part of the
 `next` rebuild. Upstream merged the picker preview and Telescope-style project
@@ -208,6 +230,31 @@ After changing the integration branch, run:
 cargo check -p languages
 ```
 
+### PR #59884 Integration Notes
+
+Import basis: PR head snapshot `035c1b6378f4f285167c0236b7b4621932e72b53`
+(`pr/59884-group-by-staging`). Layered commits on the integration branch:
+
+1. Squash import of the PR (group-by-staging view option, +/- stage buttons).
+2. Cherry-picks of the two commits the PR author reverted before our import:
+   the per-section diff stats and the collab diff-stat field initialization
+   (the collab crate does not compile with the first but not the second).
+3. Fork tailoring: `SoloDiffView` accepts a diff base, and panel clicks in
+   staging-grouped sections open per-file diffs against the section's base
+   (staged row: `HEAD -> index` with the staged delegate; unstaged row:
+   `index -> working tree`). Other groupings keep the default behavior.
+
+The group-by-staging view is enabled per-user via `settings.json`
+(`git_panel.group_by`), not by changing the upstream default in code.
+
+After changing the integration branch, run:
+
+```sh
+cargo test -p git_ui group_by_staging
+cargo test -p git_ui test_group_by_staging_solo_diff_hunk_toggle_does_not_duplicate
+cargo check -p git_ui -p project -p collab
+```
+
 ### Git UI Improvements Integration Notes
 
 Import basis: external fork snapshot
@@ -221,30 +268,24 @@ directly. It intentionally omits the fork README and `build_fork` GitHub Actions
 changes, because this fork already has its own README, package flow, and
 `zed-next` release workflow.
 
-Local adaptations in the current branch:
+The branch was rebuilt from scratch on 2026-07-10 after upstream absorbed most
+of its former scope (see Retired Integrations). Current content, two features:
 
-- Keep upstream's `SoloDiffView` as the whole-file Git diff view.
-- Make normal Git panel file clicks open the upstream solo diff view.
-- Make the secondary confirm path (`ctrl/cmd` click or the secondary confirm
-  action) open the shared Project Diff multibuffer instead.
-- Preserve staged-vs-unstaged row selection for partially staged files.
-- Use staged/unstaged-only diff base behavior where practical: staged rows
-  should show `HEAD -> index`, and unstaged rows should show
-  `index -> working tree`.
-- Port file-history commit navigation from the external branch, so single-file
-  commit views can navigate to the previous or next commit touching that file.
+- Per-entry view-file button: an arrow icon button on panel file entries that
+  runs the upstream `ViewFile` action for that entry.
+- File-history commit navigation: single-file commit views can navigate to the
+  previous or next commit touching that file, reusing the upstream
+  `CommitView::open` file filter and `LogSource::Path` streaming.
 
-The old external branch also contained `git_panel.auto_fetch_interval`,
-`git_panel.diff_page_size`, and alt-click marked-entry bulk operations. Those
-are intentionally not part of this fork integration unless they are requested
-again later.
+Everything else the branch used to carry is upstream now: panel click routing
+(`git_panel.entry_primary_click_action`), staged/unstaged diff views and base
+plumbing (`DiffBase`, PR 46541), and staging-aware panel sections (imported
+separately via `integration/59884-group-by-staging`).
 
 After changing the integration branch, run:
 
 ```sh
-cargo test -p git_ui test_filtered_head_diff_uses_index_for_partially_staged_file
-cargo test -p git_ui test_select_entry_by_path_prefers_staged_row_for_partially_staged_file
-cargo check -p git_ui
+cargo check -p git_ui -p project
 ```
 
 When adding one, use this branch format:

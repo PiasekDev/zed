@@ -34,6 +34,19 @@ git fetch upstream --prune
 git fetch origin --prune
 ```
 
+Before touching branches, snapshot the current set and preview conflicts:
+
+```sh
+for b in next next-base scroll-to-switch-tabs integration/…; do
+  git update-ref "refs/backups/$(date +%F)/${b//\//-}" "refs/heads/$b"
+done
+git merge-tree --write-tree <new-base> <branch>   # per branch; conflict dry-run
+```
+
+Backups live under `refs/backups/<date>/`, not as `backup/*` branches, so
+`git branch` stays legible. Keep the two most recent generations; delete older
+ones after a release built from the new set is confirmed good.
+
 Rebase custom patch branches:
 
 ```sh
@@ -62,7 +75,26 @@ git merge --no-ff \
 
 Use [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md) for the current branch list.
 If the octopus merge conflicts, fix the relevant integration branch first and
-retry the assembly merge.
+retry the assembly merge. When two integration branches conflict with each
+other (it has happened on shared `pane.rs` import lists), the octopus cannot
+resolve it: fall back to sequential `git merge --no-ff` for the colliding pair,
+resolving in that merge commit only, and keep the octopus for the rest.
+
+Notes that keep rebases quiet:
+
+- `README.md` carries `merge=ours` in `.gitattributes` (driver:
+  `git config merge.ours.driver true`, set locally). Upstream README changes
+  never conflict; cherry-pick wanted upstream README content deliberately.
+- Upstream workflow files are kept, not deleted. Unwanted workflows are
+  disabled in repo settings. After pushing a refreshed `next-base`, run the
+  disable sweep so newly added upstream workflows do not start running:
+
+```sh
+gh workflow list --repo PiasekDev/zed --json name,path,state \
+  --jq '.[] | select(.state == "active") | .path' |
+  grep -v -e zed_next -e open_refresh_proposal -e promote_refresh |
+  xargs -r -n1 basename | xargs -r -n1 gh workflow disable --repo PiasekDev/zed
+```
 
 For a new selected upstream PR:
 
@@ -98,19 +130,32 @@ git switch -C pr/<number>-<short-name> FETCH_HEAD
 git push --force-with-lease origin pr/<number>-<short-name>
 ```
 
+Before importing from the snapshot, verify it actually points at the PR head
+(`gh pr view <number> -R zed-industries/zed --json headRefOid`). A stale
+`FETCH_HEAD` between fetch and branch creation has produced a snapshot branch
+pointing at unrelated local work while the import commit message claimed the
+right SHA — the import then silently brings in the wrong code.
+
 ## Publishing
 
 Do not push `next` until it contains all intended patches and PR branches for
 that build. A push to `next` starts the GitHub Actions build.
+
+Gate before pushing: `cargo check --workspace` plus the per-integration test
+lists in `NEXT_INTEGRATIONS.md`. Integration-crate checks alone have let a
+release build fail on an untouched crate (`settings_ui`, 2026-06-30).
 
 When ready:
 
 ```sh
 git push origin next-base
 git push --force-with-lease origin next
+git push origin upstream/main:main   # keep the origin mirror current
 ```
 
-`next-base` does not trigger the build workflow. `next` does.
+`next-base` does not trigger the build workflow. `next` does. Pushes go over
+HTTPS using the gh CLI credential helper (`gh auth setup-git`; `origin`'s push
+URL is HTTPS), so no hardware-key touch is needed.
 
 ## Build Outputs
 
@@ -168,15 +213,77 @@ git -c commit.gpgsign=false commit ...
 git -c commit.gpgsign=false rebase ...
 ```
 
-When an agent creates or rewrites such commits, include this trailer:
+When an agent creates or rewrites such commits, include a co-author trailer
+for the agent that authored the work, for example:
 
 ```text
 Co-authored-by: Codex <codex@openai.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 ```
 
 Use the same trailer for follow-up fixup commits, amended commits, and rewritten
 integration-branch commits. Merge commits on `next` can remain simple merge
 markers.
+
+## Working Style
+
+Frontload decisions: collect everything that needs Maciej's input at the start
+of a maintenance run, then create, commit, and build without mid-run prompts.
+Stop only for true product decisions or actions that need his hardware key.
+Finish by handing back a summary plus the exact push/install commands.
+
+## Scheduled Refresh Automation
+
+The weekly refresh runs as a local Codex scheduled automation on Maciej's
+machine (Friday evening), inside the desktop session so the gh keyring
+credential is available. It never touches `next` directly; it builds a
+proposal and promotion happens only through Maciej's PR approval.
+
+### Proposal flow
+
+1. Fetch `upstream` and `origin`; read `UPSTREAM_WATCHLIST.md`.
+2. Build the refresh on fresh dated branches, never on the live ones:
+   `refresh/<YYYY-MM-DD>/next-base`, one `refresh/<YYYY-MM-DD>/<integration>`
+   per manifest branch, and the assembled `refresh/<YYYY-MM-DD>/next`.
+3. Gate: `git merge-tree` dry-runs, `cargo check --workspace`, the manifest's
+   per-integration test lists. Gate failures do not block the proposal; they
+   are reported prominently in the summary instead.
+4. Write the summary to `.github/refresh-report.md` on the proposal `next`
+   branch: upstream range, watchlist state changes, conflicts and how they
+   were resolved, obsolescence candidates, gate results, and per-integration
+   GitHub compare links (the raw PR diff includes upstream churn and is not
+   the review artifact).
+5. Push the dated branches, then dispatch the PR opener:
+   `gh workflow run open_refresh_proposal.yml -f branch=refresh/<date>/next -f title="Refresh next from upstream <date>"`.
+   The PR is opened by `github-actions[bot]` because GitHub forbids approving
+   your own PR and the local automation authenticates as the repo owner.
+
+### Promotion
+
+Approving the proposal PR is the go-ahead. The `promote_refresh` workflow
+(trigger: PR review submitted; guarded to approvals by the repo owner on
+`refresh/*`-headed, `refresh-proposal`-labeled PRs against `next`) then:
+
+1. Force-pushes `next` to the proposal head.
+2. Dispatches `zed_next.yml` explicitly — required because `GITHUB_TOKEN`
+   pushes never trigger other workflows.
+3. Comments on the PR and deletes the proposal branches. The PR closes as
+   merged on its own once `next` contains the head commits.
+
+Steering instead of approving: comment on the PR; the next automation run (or
+an on-demand run) reads open proposal-PR comments and rebuilds the proposal
+accordingly. Rejecting: close the PR; nothing was changed.
+
+After promotion, the next scheduled run fast-forwards the live branch set
+(`next-base`, integrations) to what was promoted and pushes `origin/main` to
+mirror `upstream/main`.
+
+### Authentication
+
+Git pushes use HTTPS with the gh CLI credential helper (`gh auth setup-git`;
+`origin` push URL is HTTPS). No YubiKey and no separate PAT. The gh token
+lives in the desktop keyring, so headless runs outside the session will fail
+auth — this is accepted, not a bug to fix with a plaintext token.
 
 ## Installing
 
@@ -227,16 +334,20 @@ auto-update and points updates back to this fork/package flow.
 
 When asked to update this fork:
 
-1. Read this file.
-2. Fetch `upstream` and `origin`.
-3. Rebase `next-base` on `upstream/main`, using unsigned agent commits with the
-   Codex co-author trailer for agent-authored changes.
-4. Ask Maciej to rebase personal patch branches on `upstream/main` when those
-   commits should remain signed by him.
-5. Recreate `next` from `next-base`.
-6. Merge the branches listed in `NEXT_INTEGRATIONS.md` in order.
-7. Fetch any requested upstream PR branches as `pr/<number>-<name>`.
-8. Fetch any requested external fork branches as `external/<owner>-<name>`.
-9. Update `NEXT_INTEGRATIONS.md` if the intended build set changed.
-10. Validate package metadata with `makepkg --printsrcinfo` for packages touched.
-11. Do not push `next` until the requested PR set is complete.
+1. Read this file, `NEXT_INTEGRATIONS.md`, and `UPSTREAM_WATCHLIST.md`.
+2. Fetch `upstream` and `origin`; snapshot the branch set to
+   `refs/backups/<date>/` and dry-run conflicts with `git merge-tree`.
+3. Rebase `next-base` on `upstream/main`, using unsigned agent commits with
+   the authoring agent's co-author trailer.
+4. Rebase custom patch branches (agents may do this unsigned; involve Maciej
+   only for product decisions).
+5. Rebase or rebuild the integration branches listed in
+   `NEXT_INTEGRATIONS.md`; verify `pr/*` snapshot tips against the upstream
+   PR head SHA before any import.
+6. Recreate `next` from `next-base` and assemble with the octopus merge.
+7. Gate: `cargo check --workspace` plus the manifest's per-integration tests.
+8. Update `NEXT_INTEGRATIONS.md` and `UPSTREAM_WATCHLIST.md` if the build set
+   or watched items changed.
+9. Validate package metadata with `makepkg --printsrcinfo` for packages touched.
+10. Do not push `next` until the intended set is complete; after pushing
+    `next-base`, run the workflow disable sweep; also push the `main` mirror.
