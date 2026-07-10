@@ -70,6 +70,7 @@ git merge --no-ff \
   integration/55404-detachable-items \
   integration/git-ui-improvements \
   integration/28674-tailwind-rust-completion \
+  integration/59884-group-by-staging \
   -m "Assemble next fork integrations"
 ```
 
@@ -154,8 +155,9 @@ git push origin upstream/main:main   # keep the origin mirror current
 ```
 
 `next-base` does not trigger the build workflow. `next` does. Pushes go over
-HTTPS using the gh CLI credential helper (`gh auth setup-git`; `origin`'s push
-URL is HTTPS), so no hardware-key touch is needed.
+HTTPS using the gh CLI credential helper configured repo-locally (see
+Authentication under Scheduled Refresh Automation), so no hardware-key touch
+is needed in this repository.
 
 ## Build Outputs
 
