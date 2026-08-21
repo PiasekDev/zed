@@ -5346,13 +5346,13 @@ impl GitPanel {
             } else if group_by_staging_state {
                 if staging.has_staged() {
                     staged_entries.push(GitStatusEntry {
-                        diff_stat: status_entry.staged_diff_stat,
+                        diff_stat: status_entry.staged_diff_stat.or(status_entry.diff_stat),
                         ..entry.clone()
                     });
                 }
                 if staging.has_unstaged() {
                     unstaged_entries.push(GitStatusEntry {
-                        diff_stat: status_entry.unstaged_diff_stat,
+                        diff_stat: status_entry.unstaged_diff_stat.or(status_entry.diff_stat),
                         ..entry
                     });
                 }
@@ -5733,20 +5733,18 @@ impl GitPanel {
         self.new_staged_count = 0;
         self.tracked_staged_count = 0;
         self.entry_count = 0;
-        self.diff_stat_total = DiffStat::default();
+        self.diff_stat_total = repo
+            .cached_status()
+            .filter_map(|entry| entry.diff_stat)
+            .fold(DiffStat::default(), |mut total, diff_stat| {
+                total.added = total.added.saturating_add(diff_stat.added);
+                total.deleted = total.deleted.saturating_add(diff_stat.deleted);
+                total
+            });
 
         let change_entries = self.change_entries_by_path().cloned().collect::<Vec<_>>();
         for status_entry in change_entries {
             self.entry_count += 1;
-            if let Some(diff_stat) = status_entry.diff_stat {
-                self.diff_stat_total.added =
-                    self.diff_stat_total.added.saturating_add(diff_stat.added);
-                self.diff_stat_total.deleted = self
-                    .diff_stat_total
-                    .deleted
-                    .saturating_add(diff_stat.deleted);
-            }
-
             let stage_status = GitPanel::stage_status_for_entry(&status_entry, repo);
 
             if repo.had_conflict_on_last_merge_head_change(&status_entry.repo_path) {
@@ -10729,8 +10727,21 @@ mod tests {
         let panel = workspace.update_in(&mut cx, GitPanel::new);
         await_git_panel_entries(&panel, &mut cx).await;
 
-        let entries = panel.read_with(&mut cx, |panel, _| {
+        let entries = panel.read_with(&mut cx, |panel, cx| {
             assert_eq!(panel.entry_count, 6);
+            let expected_diff_stat_total = panel
+                .active_repository
+                .as_ref()
+                .expect("panel should have an active repository")
+                .read(cx)
+                .cached_status()
+                .filter_map(|entry| entry.diff_stat)
+                .fold(DiffStat::default(), |mut total, diff_stat| {
+                    total.added = total.added.saturating_add(diff_stat.added);
+                    total.deleted = total.deleted.saturating_add(diff_stat.deleted);
+                    total
+                });
+            assert_eq!(panel.diff_stat_total, expected_diff_stat_total);
             assert_eq!(
                 panel
                     .change_entries_by_path()
@@ -11568,6 +11579,12 @@ mod tests {
             SettingsStore::update_global(cx, |store, cx| {
                 store.update_user_settings(cx, |settings| {
                     settings.editor.diff_view_style = Some(DiffViewStyle::Unified);
+                    settings
+                        .git
+                        .get_or_insert_default()
+                        .file_diff
+                        .get_or_insert_default()
+                        .show_full_file = Some(false);
                     let git_panel = settings.git_panel.get_or_insert_default();
                     git_panel.group_by = Some(GitPanelGroupBy::Staging);
                     git_panel.entry_primary_click_action = Some(GitPanelClickBehavior::FileDiff);
@@ -11658,9 +11675,12 @@ mod tests {
         cx.run_until_parked();
 
         assert_eq!(
-            repo.load_index_text(RepoPath::from_rel_path(rel_path("src/main.rs")))
-                .await
-                .unwrap(),
+            String::from_utf8(
+                repo.load_index_text(RepoPath::from_rel_path(rel_path("src/main.rs")))
+                    .await
+                    .unwrap()
+            )
+            .unwrap(),
             committed_contents
         );
         assert_eq!(
@@ -11694,9 +11714,12 @@ mod tests {
         cx.run_until_parked();
 
         assert_eq!(
-            repo.load_index_text(RepoPath::from_rel_path(rel_path("src/main.rs")))
-                .await
-                .unwrap(),
+            String::from_utf8(
+                repo.load_index_text(RepoPath::from_rel_path(rel_path("src/main.rs")))
+                    .await
+                    .unwrap()
+            )
+            .unwrap(),
             staged_contents
         );
         assert_eq!(
