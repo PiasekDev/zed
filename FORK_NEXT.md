@@ -234,12 +234,15 @@ of a maintenance run, then create, commit, and build without mid-run prompts.
 Stop only for true product decisions or actions that need his hardware key.
 Finish by handing back a summary plus the exact push/install commands.
 
-## Scheduled Refresh Automation
+## Refresh Proposals
 
-The weekly refresh runs as a local Codex scheduled automation on Maciej's
-machine (Friday evening), inside the desktop session so the gh keyring
-credential is available. It never touches `next` directly; it builds a
-proposal and promotion happens only through Maciej's PR approval.
+Refreshes currently run manually. The former local Codex automation was
+removed on 2026-08-12 after unreliable scheduling and a blocked PR-opening
+workflow. Recreating or debugging that automation is separate from refreshing
+the fork.
+
+A refresh must not touch `next` directly. Build and verify a proposal on dated
+branches, then promote it only after Maciej approves the result.
 
 ### Proposal flow
 
@@ -255,10 +258,9 @@ proposal and promotion happens only through Maciej's PR approval.
    were resolved, obsolescence candidates, gate results, and per-integration
    GitHub compare links (the raw PR diff includes upstream churn and is not
    the review artifact).
-5. Push the dated branches, then dispatch the PR opener:
-   `gh workflow run open_refresh_proposal.yml -f branch=refresh/<date>/next -f title="Refresh next from upstream <date>"`.
-   The PR is opened by `github-actions[bot]` because GitHub forbids approving
-   your own PR and the local automation authenticates as the repo owner.
+5. Review the dated branches locally. Pushing them and opening a proposal PR
+   require separate approval. The repository-level Actions setting currently
+   prevents `open_refresh_proposal.yml` from creating that PR automatically.
 
 ### Promotion
 
@@ -272,23 +274,10 @@ Approving the proposal PR is the go-ahead. The `promote_refresh` workflow
 3. Comments on the PR and deletes the proposal branches. The PR closes as
    merged on its own once `next` contains the head commits.
 
-Steering instead of approving: comment on the PR; the next automation run (or
-an on-demand run) reads open proposal-PR comments and rebuilds the proposal
-accordingly. Rejecting: close the PR; nothing was changed.
-
-After promotion, the next scheduled run fast-forwards the live branch set
-(`next-base`, integrations) to what was promoted and pushes `origin/main` to
-mirror `upstream/main`.
-
-### Schedule
-
-The schedule lives as the Codex Desktop automation `zed-fork-refresh-proposal`
-(weekly, Friday 19:00 Europe/Warsaw). Manage it through a Codex Desktop
-thread using Codex's automation tool; it is not exposed via the Codex CLI or
-app-server API. This machine's scheduler has previously mispersisted
-`TZID=Europe/Warsaw` rules as UTC — after any schedule change, verify
-`next_run_at` in `~/.codex/sqlite/codex-dev.db` converts to the intended
-local time.
+Steering instead of approving: comment on the PR or request a local rebuild.
+Rejecting: close the PR; nothing was changed. After promotion, fast-forward the
+live branch set to the tested proposal and push `origin/main` to mirror
+`upstream/main`.
 
 ### Authentication
 

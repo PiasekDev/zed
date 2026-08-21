@@ -61,9 +61,9 @@ rebases on `next-base`.
 | Branch | Raw Source Branch | Upstream PR | Upstream Author | Source Anchor | Purpose | Retirement condition |
 | --- | --- | --- | --- | --- | --- | --- |
 | `integration/55404-detachable-items` | `pr/55404-detachable-items` | [zed-industries/zed#55404](https://github.com/zed-industries/zed/pull/55404) | `iam-liam` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | Adds detachable editor items, with local drag-out/reattach behavior and maximized detached windows. | Upstream merges the PR or ships an equivalent detach/reattach feature. |
-| `integration/git-ui-improvements` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908006e3d206257239df57530b32418e0` | Per-entry view-file button and file-history commit navigation. Rebuilt 2026-07-10 at ~200 lines after upstream absorbed the rest (see Retired Integrations). | View-file button and in-view file-history navigation land upstream (watch issue 59761 and the upstream history views). |
+| `integration/git-ui-improvements` | `external/firatoezcan-main` | External fork branch | Firat Ozcan `<admin@firatoezcan.com>` | `bd20394908006e3d206257239df57530b32418e0` | Per-entry view-file button and file-history commit navigation. Rebuilt 2026-07-10 at ~200 lines after upstream absorbed the rest (see Retired Integrations). | Both the inline button and in-view previous/next file-history navigation land upstream. |
 | `integration/28674-tailwind-rust-completion` | `pr/28674-tailwind-rust-completion` | [zed-industries/zed#28674](https://github.com/zed-industries/zed/pull/28674) | `I-Info` | `19a316e2b359c1bfaa2cff1af1c57581df76bd5d` | Enables Tailwind CSS completions in Rust string contexts. | Upstream registers Rust for Tailwind completions (the PR itself was closed unmerged). |
-| `integration/59884-group-by-staging` | `pr/59884-group-by-staging` | [zed-industries/zed#59884](https://github.com/zed-industries/zed/pull/59884) | `chirivelli` | `035c1b6378f4f285167c0236b7b4621932e72b53` | Group-by-staging panel view with +/- stage buttons; re-adds the PR's reverted per-section diff stats; fork tailoring opens per-file solo diffs against section bases (staged row: HEAD to index, unstaged row: index to worktree). | Upstream merges the PR; on merge, re-check whether the diff stats and the per-section solo diff behavior came with it, and keep only the missing tailoring. |
+| `integration/59884-group-by-staging` | `pr/59884-group-by-staging` | [zed-industries/zed#59884](https://github.com/zed-industries/zed/pull/59884) | `chirivelli` | `035c1b6378f4f285167c0236b7b4621932e72b53` | Compatibility fixes for upstream section stats plus fork-only per-file solo diffs against section bases (staged row: HEAD to index, unstaged row: index to worktree). | Upstream gains section-aware per-file solo diffs, combined-total/fallback semantics, and section-stat-only remote updates. |
 
 `Source Anchor` is the immutable upstream or external revision used as the
 reference point for an integration. It may be a raw source branch tip, a
@@ -190,8 +190,9 @@ Import basis: single upstream feature commit
 This PR needs an adapted branch for conflict resolution against current
 `next-base` and local behavior changes:
 
-- Resolve `crates/editor/src/editor.rs` by keeping the current editor state and
-  adding the PR's window activation subscription for moved editor items.
+- Keep current upstream editor activation behavior. Do not restore the source
+  PR's per-editor window activation subscription; upstream removed it because
+  it caused blink/redraw regressions and detachment does not require it.
 - Rename the action from moving the active item to a new window to
   `DetachActiveItem`, with user-facing text `Detach Item`.
 - Add tab drag-out behavior that detaches a tab into a maximized window.
@@ -232,17 +233,21 @@ cargo check -p languages
 
 ### PR #59884 Integration Notes
 
-Import basis: PR head snapshot `035c1b6378f4f285167c0236b7b4621932e72b53`
-(`pr/59884-group-by-staging`). Layered commits on the integration branch:
+Import basis: historical PR head snapshot
+`035c1b6378f4f285167c0236b7b4621932e72b53`
+(`pr/59884-group-by-staging`). Upstream merged the group-by-staging view and
+per-section diff-stat data. Do not replay the old import or its reverted stats
+commits.
 
-1. Squash import of the PR (group-by-staging view option, +/- stage buttons).
-2. Cherry-picks of the two commits the PR author reverted before our import:
-   the per-section diff stats and the collab diff-stat field initialization
-   (the collab crate does not compile with the first but not the second).
-3. Fork tailoring: `SoloDiffView` accepts a diff base, and panel clicks in
-   staging-grouped sections open per-file diffs against the section's base
-   (staged row: `HEAD -> index` with the staged delegate; unstaged row:
-   `index -> working tree`). Other groupings keep the default behavior.
+The integration now contains only behavior still missing upstream:
+
+- `SoloDiffView` accepts a diff base. Staged rows open `HEAD -> index` with the
+  staged delegate; unstaged rows open `index -> working tree`. Other groupings
+  keep the normal `HEAD -> working tree` behavior.
+- Section rows fall back to the combined stat when a section-specific stat is
+  absent, while the panel total remains the combined staged-plus-unstaged stat.
+- Remote repository updates include changes where only staged or unstaged diff
+  stats changed.
 
 The group-by-staging view is enabled per-user via `settings.json`
 (`git_panel.group_by: "staging"`), not by changing the upstream default in
@@ -255,7 +260,8 @@ After changing the integration branch, run:
 ```sh
 cargo test -p git_ui group_by_staging
 cargo test -p git_ui test_group_by_staging_solo_diff_hunk_toggle_does_not_duplicate
-cargo check -p git_ui -p project -p collab
+cargo test -p project build_update
+cargo check -p git_ui -p project
 ```
 
 ### Git UI Improvements Integration Notes
@@ -282,13 +288,15 @@ of its former scope (see Retired Integrations). Current content, two features:
 
 Everything else the branch used to carry is upstream now: panel click routing
 (`git_panel.entry_primary_click_action`), staged/unstaged diff views and base
-plumbing (`DiffBase`, PR 46541), and staging-aware panel sections (imported
-separately via `integration/59884-group-by-staging`).
+plumbing (`DiffBase`, PR 46541), and staging-aware panel sections. Upstream
+issue 59761 was also fixed, but that fix only corrected commit-diff header
+context-menu identities; it did not add this branch's navigation.
 
 After changing the integration branch, run:
 
 ```sh
 cargo check -p git_ui -p project
+cargo test -p git_ui commit_view
 ```
 
 When adding one, use this branch format:
