@@ -144,8 +144,17 @@ cmd_start() {
   done
 
   local dated_base="${prefix}/next-base"
+  # When upstream moved since the last run, the dated next-base gets rebased
+  # again and the integrations no longer descend from it. Remember where they
+  # sit so they can be moved with --onto instead of relying on patch-id
+  # detection to skip the replayed next-base commits.
+  local previous_base_ref="refs/fork-refresh/${date_tag}/previous-next-base"
   echo "Rebasing next-base on upstream/main"
-  if ! branch_exists "$dated_base"; then
+  if branch_exists "$dated_base"; then
+    if ! git merge-base --is-ancestor upstream/main "$dated_base"; then
+      git update-ref "$previous_base_ref" "$dated_base"
+    fi
+  else
     git branch -q "$dated_base" "$(source_ref next-base)"
   fi
   rebase_onto "$dated_base" upstream/main
@@ -156,10 +165,14 @@ cmd_start() {
     if ! branch_exists "$dated"; then
       git branch -q "$dated" "$(source_ref "$branch")"
       rebase_onto "$dated" "$dated_base" "$(source_ref next-base)"
+    elif git show-ref --verify --quiet "$previous_base_ref" \
+      && git merge-base --is-ancestor "$previous_base_ref" "$dated"; then
+      rebase_onto "$dated" "$dated_base" "$previous_base_ref"
     else
       rebase_onto "$dated" "$dated_base"
     fi
   done
+  git update-ref -d "$previous_base_ref" 2>/dev/null || true
 
   git switch -q "$dated_base"
   echo "All proposal branches sit on ${dated_base}. Next: script/fork-refresh assemble --date ${date_tag}"
