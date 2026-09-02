@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> Remove this line to confirm you've reviewed this PR before submitting.
+
 # Zed Next
 
 This is a personal downstream build of [Zed](https://github.com/zed-industries/zed)
