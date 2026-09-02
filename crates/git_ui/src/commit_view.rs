@@ -88,7 +88,6 @@ pub struct CommitView {
     is_shallow_boundary: bool,
     file_filter: Option<RepoPath>,
     _load_diff_task: Task<Result<()>>,
-    file_filter: Option<RepoPath>,
 }
 
 pub(crate) struct GitBlob {
@@ -526,7 +525,6 @@ impl CommitView {
             is_shallow_boundary,
             file_filter,
             _load_diff_task: load_diff_task,
-            file_filter,
         }
     }
 
@@ -1374,7 +1372,6 @@ impl Item for CommitView {
                 is_shallow_boundary: self.is_shallow_boundary,
                 file_filter: self.file_filter.clone(),
                 _load_diff_task: Task::ready(Ok(())),
-                file_filter: self.file_filter.clone(),
             }
         })))
     }
