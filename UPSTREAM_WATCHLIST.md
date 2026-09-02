@@ -1,38 +1,36 @@
-# Upstream Watchlist
+# Upstream watchlist
 
-Tracked upstream PRs, issues, and feature areas that affect this fork. The
-refresh process reads this file and reports state changes in each proposal.
-Update entries when their state changes; remove entries when the linked
-retirement or follow-up action has been completed.
+What upstream may absorb or has partly absorbed. Each refresh checks these
+against the upstream range and records state changes in the proposal report.
+Remove an entry when its fork action is done.
 
 ## Retirement triggers
 
-Items that retire fork branches when they land upstream.
-
-| Item | State to watch | Fork action when it changes |
+| Watch | State (2026-09-03) | Fork action on change |
 | --- | --- | --- |
-| Section-aware per-file solo diffs | Missing upstream as of 2026-08-21 | Retire `integration/59884-group-by-staging` only when upstream preserves staged `HEAD -> index`, unstaged `index -> worktree`, combined totals/fallbacks, and section-stat-only remote updates |
-| [PR #55404](https://github.com/zed-industries/zed/pull/55404) move item to new window | Open (stale) | On merge or equivalent feature: re-evaluate `integration/55404-detachable-items` against the upstream implementation |
-| Wheel tab switching upstream | No upstream work known | On appearance: retire `scroll-to-switch-tabs` |
+| Wheel tab switching upstream | None known | Retire `scroll-to-switch-tabs` |
+| [PR 55404](https://github.com/zed-industries/zed/pull/55404) move item to new window | Open, last activity 2026-08-25 | Re-evaluate `integration/55404-detachable-items` against the upstream implementation |
+| Inline view-file button and previous/next file-history navigation | Missing upstream. Upstream has file history views (PRs 52634 and 56500 merged), a `file_filter` on `CommitView`, and a Git Graph view (`crates/git_ui/src/git_graph.rs`) | Retire `integration/git-ui-improvements` when both land; narrow it as pieces land |
+| Rust registered for Tailwind completions | Missing upstream | Retire `integration/28674-tailwind-rust-completion` |
+| Section-aware per-file solo diffs | Missing upstream. Grouping and section stats landed (PRs 59884, 60976, 60815); hunk operations moved onto `BufferDiff` (PR 63556, 2026-09) | Retire `integration/59884-group-by-staging` when upstream opens section-base diffs with the same stat semantics |
 
-## Feature areas to re-check each refresh
+## Re-check each refresh
 
-| Item | Why it is watched |
+| Area | Why |
 | --- | --- |
-| [PR #59884](https://github.com/zed-industries/zed/pull/59884) and [issue #26560](https://github.com/zed-industries/zed/issues/26560) | Closed upstream; section grouping and stats landed, but per-file section bases and three correctness details remain fork-only |
-| [Issue #59761](https://github.com/zed-industries/zed/issues/59761) Git panel history commit-diff actions | Closed by PR #60807, which fixed header context-menu identities only; the fork's previous/next file-history navigation remains distinct |
-| Hunk-level stage/unstage reliability | Flagged as possibly buggy upstream (2026-06-20 session); re-test after each refresh that touches git_ui |
-| Upstream file/folder history views (#52634, #56500) | May grow to cover the fork's file-history navigation |
+| Git panel multi-select with bulk stage, unstage, and discard (PR 60340, 2026-08) | Same panel code as the staging integration; watch for regressions in grouped sections |
+| Hunk-level stage and unstage reliability | Flagged as possibly buggy upstream (2026-06); re-test after each refresh that touches `git_ui` |
+| Upstream tab features in `pane.rs` (file permalinks, PR 62177) | Shares the import lines that `scroll-to-switch-tabs` touches; the usual rebase conflict is there |
 
-## Revisit later, intended for upstream
+## Intended for upstream later
 
-Features Maciej wants to build or polish for upstream itself, not carry as
-fork patches long-term. Do not open upstream PRs for these until he has
-personally tested and approved the code.
+Features Maciej wants in upstream, not as long-term fork patches. No upstream
+PR until he has personally tested and approved the code.
 
-| Item | Status | Notes |
-| --- | --- | --- |
-| Rename detection in git status/staged views | Not started | Upstream still uses `--no-renames` in status paths; needs status pipeline + proto + panel work. Revisit and build upstream-first when prioritized |
-| `scroll-to-switch-tabs` | Shipped in fork | Oldest custom patch; Maciej wants a fresh-angle rework before proposing upstream |
-| Jump-to-source from diff views | Planned | VS Code `git.openFile` parity; ship in fork first, upstream once the code is liked |
-| Commit-message style few-shot (Tier 1) | Parked | Only if `agent.commit_message_instructions` (Tier 0) proves insufficient |
+| Item | Status |
+| --- | --- |
+| `scroll-to-switch-tabs` | Shipped in the fork; wants a fresh-angle rework first |
+| Rename detection in git status and staged views | Not started; upstream status paths still use `--no-renames` |
+| Jump-to-source from diff views (VS Code `git.openFile` parity) | Planned |
+| Word-level diff highlighting, commit list per branch, review comments, AI rename suggestions | Planned 2026-09-03; see the plan page under `~/pages/zed/` |
+| Commit-message style few-shot | Parked unless `agent.commit_message_instructions` proves insufficient |

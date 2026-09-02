@@ -15,17 +15,10 @@ issue tracker, use:
 
 ## Branches
 
-- `next-base`: fork infrastructure, packaging, release workflow, and fork docs.
-- `next`: daily-driver build branch. It starts from `next-base`, then uses one
-  assembly merge for personal patch branches and selected upstream PR branches.
-- `scroll-to-switch-tabs`: personal patch branch currently included in `next`.
-- `pr/<number>-<short-name>`: raw local snapshots of upstream Zed PRs.
-- `integration/<number>-<short-name>`: adapted PR branches that carry local
-  conflict resolutions or compatibility fixes.
-
-See [FORK_NEXT.md](./FORK_NEXT.md) for the full branch, update, and release
-workflow. See [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md) for the current
-patch/PR integration manifest used to rebuild `next`.
+`next` is the daily-driver build, assembled from `next-base` (fork
+infrastructure) and the integration branches listed in
+[NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md). The maintenance workflow,
+including the weekly refresh, is in [FORK_NEXT.md](./FORK_NEXT.md).
 
 ## Installing
 

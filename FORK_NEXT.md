@@ -1,291 +1,152 @@
-# Zed Next Fork Workflow
+# Zed Next fork
 
-This repository is a personal downstream build of Zed. The goal is to keep a
-small infrastructure branch on top of upstream `main`, then build the daily
-driver `next` branch by merging selected personal patch branches and selected
-upstream pull requests.
+`PiasekDev/zed` is Maciej's personal downstream build of Zed. It runs editor
+features upstream does not have yet on top of a fresh upstream `main`, as an
+Arch package that replaces the stock Zed. Agents do most of the maintenance;
+this file is written for them as much as for Maciej.
+
+Read this file, then [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md) (the build
+set) and [UPSTREAM_WATCHLIST.md](./UPSTREAM_WATCHLIST.md) (what upstream may
+absorb), before touching any branch.
+
+## Principles
+
+- **Infrastructure and behavior never share a branch.** `next-base` carries
+  packaging, workflows, scripts, and these docs on top of `upstream/main`.
+  Editor behavior lives on one branch per feature. `next` is only ever
+  assembled from them; nobody commits to `next` directly.
+- **A refresh is a proposal, not an edit.** Rebases happen on dated
+  `refresh/<date>/*` copies. The live branch set moves in one step at
+  promotion, after the proposal built and was reviewed. Two 2026 proposals
+  were never promoted and the fork went stale for two months: promote or
+  discard a proposal, never leave one hanging.
+- **Raw sources stay immutable.** `pr/*` and `external/*` snapshots are
+  evidence of what was imported. Adaptation happens on `integration/*`
+  branches in layers: import commit, compatibility fixes, fork tailoring,
+  each its own commit, so the fork's share of a feature stays inspectable.
+- **Upstream absorbs, the fork retires.** Every integration has a retirement
+  condition in the manifest and a watchlist entry. Every refresh checks them
+  and narrows or retires what upstream now carries.
+- **Agents do the mechanics, Maciej decides and pushes.** Agent commits are
+  unsigned with a co-author trailer. Decisions are collected up front; a run
+  does not stop to ask. Only product decisions and hardware-key actions wait
+  for Maciej.
+- **Everything gates on the whole workspace.** `cargo check --workspace`
+  before anything is proposed; per-crate checks have let a release build fail
+  on an untouched crate.
 
 ## Branches
 
-- `upstream/main`: read-only remote from `zed-industries/zed`.
-- `origin/main`: optional mirror of upstream `main` in `PiasekDev/zed`.
-- `next-base`: fork infrastructure only. This contains packaging, release, and
-  local build support. It should not contain editor behavior patches.
-- `next`: daily-driver branch. Start from `next-base`, then merge custom patch
-  branches and selected upstream PR branches.
-- Custom patch branches: named directly, for example `scroll-to-switch-tabs`.
-  Keep these rebaseable on top of `upstream/main`.
-- Raw upstream PR snapshot branches: use `pr/<number>-<short-name>`.
-- Raw external fork snapshot branches: use `external/<owner>-<short-name>`.
-- Adapted integration branches: use `integration/<number>-<short-name>` for
-  upstream PRs and `integration/<owner-or-feature>-<short-name>` for external
-  forks.
+| Pattern | Holds | Moves at |
+| --- | --- | --- |
+| `upstream/main` | Upstream Zed. Fetch over HTTPS; the SSH push URL would prompt the hardware key | Upstream pushes |
+| `origin/main` | Mirror of `upstream/main` on the fork | Every proposal |
+| `next-base` | Fork infrastructure only. GitHub default branch, so its workflow files are the ones that run | Promotion |
+| `<feature>` (no prefix) | Personal patch branch rebased on `upstream/main`, for example `scroll-to-switch-tabs` | Promotion |
+| `pr/<number>-<name>`, `external/<owner>-<name>` | Raw upstream-PR or external-fork snapshot; never merged directly | Only to re-snapshot a moved source |
+| `integration/<number-or-owner>-<name>` | Adapted snapshot rebased on `next-base` | Promotion |
+| `refresh/<date>/<any of the above>` | Dated proposal copies | Deleted at promotion |
+| `next` | `next-base` plus one octopus merge of the build set. Pushing it starts the `zed_next` build | Promotion |
+| `refs/backups/<date>/*` | Pre-refresh snapshot of the live set; keep two generations | `script/fork-refresh start` |
 
-The current intended merge set is tracked in
-[NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md). Update that file whenever a
-custom patch branch or upstream PR snapshot is added to or removed from `next`.
+## Refresh runbook
 
-## Updating From Upstream
+`script/fork-refresh` does the mechanics and stops where judgment is needed.
+Run it from the repository root on a clean tree; `--date` defaults to today.
 
-Fetch upstream first:
+1. `script/fork-refresh start` fetches, backs up the live set, creates the
+   dated branches, rebases `next-base` on `upstream/main` and every build-set
+   branch on the dated `next-base`. It stops on the first conflict and prints
+   the commands to continue; re-running is idempotent. Pass
+   `--from refresh/<previous-date>` when an earlier proposal carries newer
+   adaptations than the live branches.
+2. Judge. For each build-set branch, check its retirement condition and the
+   watchlist against the upstream range. What upstream now carries gets
+   dropped from the integration branch; compatibility fixes are named
+   follow-up commits on that branch. Manifest and watchlist edits go on the
+   dated `next-base`; after committing there, run `start` again so the
+   integrations sit on the new tip.
+3. `script/fork-refresh assemble` recreates the dated `next`. An octopus
+   cannot resolve two integrations touching the same lines: fix the branch,
+   or merge the colliding pair sequentially and keep the octopus for the
+   rest.
+4. `script/fork-refresh gate` runs `script/fork-refresh-gates` (workspace
+   check, fmt, the focused tests per integration) and keeps the log under
+   `target/fork-refresh/<date>/`. A failed gate is a finding for the report,
+   not a stop.
+5. `script/fork-refresh report` writes `.github/refresh-report.md`; fill in
+   its Decisions section, then `script/fork-refresh report --commit`. The
+   report becomes the PR body. Its compare links per branch are the review
+   artifact; the PR diff itself is mostly upstream churn.
+6. `script/fork-refresh propose` pushes the dated branches and the `main`
+   mirror, then opens the PR labeled `refresh-proposal` against `next`.
+7. Maciej reviews and comments `/promote` on the PR. The `promote_refresh`
+   workflow moves every live branch to its dated copy, force-pushes `next`
+   (the build starts), and deletes the dated branches. `script/fork-refresh
+   sync` then updates the local live branches. Without GitHub,
+   `script/fork-refresh promote-local` moves the local branches and prints
+   the push commands.
+8. After a promoted `next-base` reaches GitHub, disable upstream workflows
+   that arrived with the refresh. Upstream workflow files are kept so rebases
+   stay quiet; unwanted ones are disabled, not deleted:
 
-```sh
-git fetch upstream --prune
-git fetch origin --prune
-```
+   ```sh
+   gh workflow list --repo PiasekDev/zed --json name,path,state \
+     --jq '.[] | select(.state == "active") | .path' |
+     grep -v -e zed_next -e promote_refresh |
+     xargs -r -n1 basename | xargs -r -n1 gh workflow disable --repo PiasekDev/zed
+   ```
 
-Before touching branches, snapshot the current set and preview conflicts:
+Adding or retiring an integration is described in the manifest.
 
-```sh
-for b in next next-base scroll-to-switch-tabs integration/…; do
-  git update-ref "refs/backups/$(date +%F)/${b//\//-}" "refs/heads/$b"
-done
-git merge-tree --write-tree <new-base> <branch>   # per branch; conflict dry-run
-```
+## Why the pieces are shaped this way
 
-Backups live under `refs/backups/<date>/`, not as `backup/*` branches, so
-`git branch` stays legible. Keep the two most recent generations; delete older
-ones after a release built from the new set is confirmed good.
+- `README.md` has `merge=ours` in `.gitattributes` (driver:
+  `git config merge.ours.driver true`, set per clone), so upstream README
+  churn never conflicts; wanted upstream README content is cherry-picked.
+- The proposal PR is opened with the owner's token, not by a workflow:
+  GitHub Actions may not create pull requests in this repository (a
+  repository setting), and the workflow that tried failed on its first run.
+  Promotion is a `/promote` comment rather than an approval because an author
+  cannot approve their own PR.
+- The promotion workflow dispatches `zed_next.yml` explicitly: pushes made
+  with `GITHUB_TOKEN` never trigger other workflows.
+- Before importing a `pr/*` snapshot, verify its tip against
+  `gh pr view <number> -R zed-industries/zed --json headRefOid`. A stale
+  `FETCH_HEAD` once produced a snapshot pointing at unrelated local work
+  while the commit message claimed the right SHA.
+- One heavy cargo job at a time on Maciej's machine; parallel full builds
+  and test suites have frozen it (out of memory).
 
-Rebase custom patch branches:
+## Building and installing
 
-```sh
-git switch scroll-to-switch-tabs
-git -c commit.gpgsign=false rebase upstream/main
-```
+The `zed_next` workflow (`.github/workflows/zed_next.yml`) builds the Linux
+app with glibc and the remote servers with musl, and publishes the moving
+`zed-next` prerelease that `packaging/arch/zed-next-bin` installs. Keep the
+musl-specific compiler settings in the workflow: the host glibc compiler makes
+the static remote server fail to link. `sccache` comes from
+`mozilla-actions/sccache-action`; do not set `SCCACHE_GHA_ENABLED` or
+`RUSTC_WRAPPER` before that action runs.
 
-Rebase the infrastructure branch:
+Local alternatives live in `packaging/arch/` (`zed-next-local`,
+`zed-next-git`) and `script/package-zed-next-local`, which builds the current
+checkout as a stable-channel replacement (it temporarily writes `stable` to
+`crates/zed/RELEASE_CHANNEL`) and packages it with `makepkg`. Local builds
+add `-C target-cpu=native`; set `ZED_NEXT_TARGET_CPU=` to disable that. Every
+replacement build sets `ZED_UPDATE_EXPLANATION`, which turns upstream
+auto-update off.
 
-```sh
-git switch next-base
-git rebase upstream/main
-```
+The fork owns Linux remote-server distribution: bootstrap resolves the remote
+server from the `zed-next` release instead of Zed's release service, because
+a `main`-tracking fork is ahead of the stable assets. The cache key is the
+full app version, so every `next` build gets its own entry. Manual recovery:
+place a matching binary in `~/.zed_server` on the remote host.
 
-Rebuild `next` from the infrastructure branch:
+## Authentication
 
-```sh
-git switch -C next next-base
-git merge --no-ff \
-  scroll-to-switch-tabs \
-  integration/55404-detachable-items \
-  integration/git-ui-improvements \
-  integration/28674-tailwind-rust-completion \
-  integration/59884-group-by-staging \
-  -m "Assemble next fork integrations"
-```
-
-Use [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md) for the current branch list.
-If the octopus merge conflicts, fix the relevant integration branch first and
-retry the assembly merge. When two integration branches conflict with each
-other (it has happened on shared `pane.rs` import lists), the octopus cannot
-resolve it: fall back to sequential `git merge --no-ff` for the colliding pair,
-resolving in that merge commit only, and keep the octopus for the rest.
-
-Notes that keep rebases quiet:
-
-- `README.md` carries `merge=ours` in `.gitattributes` (driver:
-  `git config merge.ours.driver true`, set locally). Upstream README changes
-  never conflict; cherry-pick wanted upstream README content deliberately.
-- Upstream workflow files are kept, not deleted. Unwanted workflows are
-  disabled in repo settings. After pushing a refreshed `next-base`, run the
-  disable sweep so newly added upstream workflows do not start running:
-
-```sh
-gh workflow list --repo PiasekDev/zed --json name,path,state \
-  --jq '.[] | select(.state == "active") | .path' |
-  grep -v -e zed_next -e open_refresh_proposal -e promote_refresh |
-  xargs -r -n1 basename | xargs -r -n1 gh workflow disable --repo PiasekDev/zed
-```
-
-For a new selected upstream PR:
-
-```sh
-git fetch upstream pull/<number>/head:pr/<number>-<short-name>
-git merge --no-ff pr/<number>-<short-name> -m "Merge upstream PR <number> into next"
-```
-
-Use rebases for personal patch branches so each long-lived personal change
-remains small and readable. Use the final `next` merge commit only as assembly,
-not as a place to resolve integration conflicts.
-
-If an upstream PR needs conflict resolutions or compatibility fixes, keep the
-raw `pr/*` branch untouched and create an adapted
-`integration/<number>-<short-name>` branch on top of `next-base`. Merge the
-adapted integration branch into `next`.
-
-For external fork work, keep a raw `external/*` branch as the source snapshot
-and create an adapted `integration/*` branch for the version that should merge
-into this fork. Prefer layered integration history for new work: import the raw
-source as its own commit or merge commit, then add compatibility fixes and
-personal tailoring as follow-up commits. This makes it easy to inspect what was
-changed beyond the original source. Some current integrations predate this
-workflow and may be split into layered commits in a future cleanup.
-
-When importing an upstream PR, push a personal snapshot branch to this fork so
-the exact tested code remains available even if the upstream PR branch is
-force-pushed or deleted:
-
-```sh
-git fetch upstream pull/<number>/head
-git switch -C pr/<number>-<short-name> FETCH_HEAD
-git push --force-with-lease origin pr/<number>-<short-name>
-```
-
-Before importing from the snapshot, verify it actually points at the PR head
-(`gh pr view <number> -R zed-industries/zed --json headRefOid`). A stale
-`FETCH_HEAD` between fetch and branch creation has produced a snapshot branch
-pointing at unrelated local work while the import commit message claimed the
-right SHA — the import then silently brings in the wrong code.
-
-## Publishing
-
-Do not push `next` until it contains all intended patches and PR branches for
-that build. A push to `next` starts the GitHub Actions build.
-
-Gate before pushing: `cargo check --workspace` plus the per-integration test
-lists in `NEXT_INTEGRATIONS.md`. Integration-crate checks alone have let a
-release build fail on an untouched crate (`settings_ui`, 2026-06-30).
-
-When ready:
-
-```sh
-git push origin next-base
-git push --force-with-lease origin next
-git push origin upstream/main:main   # keep the origin mirror current
-```
-
-`next-base` does not trigger the build workflow. `next` does. Pushes go over
-HTTPS using the gh CLI credential helper configured repo-locally (see
-Authentication under Scheduled Refresh Automation), so no hardware-key touch
-is needed in this repository.
-
-## Build Outputs
-
-GitHub Actions publishes a moving prerelease named `zed-next` containing:
-
-- `zed-linux-x86_64.tar.gz`
-- `zed-remote-server-linux-x86_64.gz`
-- `zed-remote-server-linux-aarch64.gz`
-- `zed-next-SHA256SUMS.txt`
-- `zed-next-version`
-
-The binary Arch package reads `zed-next-version` so the package version follows
-the Zed crate version and commit SHA instead of hard-coding a Zed version.
-
-The workflow builds the app for glibc Linux and remote servers for musl. Keep
-the musl target-specific compiler settings in `.github/workflows/zed_next.yml`;
-using the host glibc compiler for native C dependencies can make the static
-musl remote server fail to link. The x86_64 remote server is built by the Linux
-bundle job. The aarch64 remote server is built by a separate native ARM GitHub
-Actions job and published into the same moving release. The workflow also
-enables `sccache` with the GitHub Actions cache backend through
-`mozilla-actions/sccache-action` and caches Cargo registry/git sources to make
-repeated builds faster. Do not set `SCCACHE_GHA_ENABLED` and `RUSTC_WRAPPER`
-before that action runs; raw `sccache` needs the GitHub Actions cache URL and
-runtime token that the action exposes.
-
-## Remote Server Assets
-
-This fork owns remote server distribution for replacement builds. Linux remote
-bootstrap resolves `zed-remote-server-linux-x86_64.gz` and
-`zed-remote-server-linux-aarch64.gz` from the fork's moving GitHub release:
-
-```text
-https://github.com/PiasekDev/zed/releases/download/zed-next/
-```
-
-The local cache version remains the full app version, including build metadata,
-so each pushed `next` build gets its own remote-server cache entry. Official Zed
-Cloud release lookup is intentionally bypassed for these Linux remote-server
-assets because a `main`-tracking fork can be ahead of the official stable
-release assets.
-
-If remote bootstrap fails and a manual recovery is needed, place a matching
-remote server binary in `~/.zed_server` on the remote host using the path shown
-by the connection error or logs. This should be temporary; the normal path is to
-publish the matching asset through the `zed_next` workflow.
-
-## Commit Authorship
-
-Agent-created infrastructure, integration, and custom patch branch updates are
-usually committed with signing disabled to avoid YubiKey prompts:
-
-```sh
-git -c commit.gpgsign=false commit ...
-git -c commit.gpgsign=false rebase ...
-```
-
-When an agent creates or rewrites such commits, include a co-author trailer
-for the agent that authored the work, for example:
-
-```text
-Co-authored-by: Codex <codex@openai.com>
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-```
-
-Use the same trailer for follow-up fixup commits, amended commits, and rewritten
-integration-branch commits. Merge commits on `next` can remain simple merge
-markers.
-
-## Working Style
-
-Frontload decisions: collect everything that needs Maciej's input at the start
-of a maintenance run, then create, commit, and build without mid-run prompts.
-Stop only for true product decisions or actions that need his hardware key.
-Finish by handing back a summary plus the exact push/install commands.
-
-## Refresh Proposals
-
-Refreshes currently run manually. The former local Codex automation was
-removed on 2026-08-12 after unreliable scheduling and a blocked PR-opening
-workflow. Recreating or debugging that automation is separate from refreshing
-the fork.
-
-A refresh must not touch `next` directly. Build and verify a proposal on dated
-branches, then promote it only after Maciej approves the result.
-
-### Proposal flow
-
-1. Fetch `upstream` and `origin`; read `UPSTREAM_WATCHLIST.md`.
-2. Build the refresh on fresh dated branches, never on the live ones:
-   `refresh/<YYYY-MM-DD>/next-base`, one `refresh/<YYYY-MM-DD>/<integration>`
-   per manifest branch, and the assembled `refresh/<YYYY-MM-DD>/next`.
-3. Gate: `git merge-tree` dry-runs, `cargo check --workspace`, the manifest's
-   per-integration test lists. Gate failures do not block the proposal; they
-   are reported prominently in the summary instead.
-4. Write the summary to `.github/refresh-report.md` on the proposal `next`
-   branch: upstream range, watchlist state changes, conflicts and how they
-   were resolved, obsolescence candidates, gate results, and per-integration
-   GitHub compare links (the raw PR diff includes upstream churn and is not
-   the review artifact).
-5. Review the dated branches locally. Pushing them and opening a proposal PR
-   require separate approval. The repository-level Actions setting currently
-   prevents `open_refresh_proposal.yml` from creating that PR automatically.
-
-### Promotion
-
-Approving the proposal PR is the go-ahead. The `promote_refresh` workflow
-(trigger: PR review submitted; guarded to approvals by the repo owner on
-`refresh/*`-headed, `refresh-proposal`-labeled PRs against `next`) then:
-
-1. Force-pushes `next` to the proposal head.
-2. Dispatches `zed_next.yml` explicitly — required because `GITHUB_TOKEN`
-   pushes never trigger other workflows.
-3. Comments on the PR and deletes the proposal branches. The PR closes as
-   merged on its own once `next` contains the head commits.
-
-Steering instead of approving: comment on the PR or request a local rebuild.
-Rejecting: close the PR; nothing was changed. After promotion, fast-forward the
-live branch set to the tested proposal and push `origin/main` to mirror
-`upstream/main`.
-
-### Authentication
-
-Git pushes use HTTPS with the gh CLI credential helper, configured
-**repo-locally only** — the rest of the machine stays on SSH with Maciej's
-hardware key, and this repository is the deliberate exception so agents and
-the automation can push without key touches. No separate PAT. To re-provision
-(new machine or new clone):
+Pushes use HTTPS with the gh credential helper configured **in this
+repository only**; the rest of the machine stays on SSH with the hardware
+key. Re-provision a clone with:
 
 ```sh
 git remote set-url --push origin https://github.com/PiasekDev/zed.git
@@ -293,76 +154,31 @@ git config credential."https://github.com".helper ''
 git config --add credential."https://github.com".helper '!/usr/bin/gh auth git-credential'
 ```
 
-Do not run `gh auth setup-git` for this — it writes the helper into the
-global git config. The gh token needs the `workflow` scope
-(`gh auth refresh -h github.com -s workflow`) because pushes here routinely
-carry `.github/workflows/` changes. The token lives in the desktop keyring,
-so headless runs outside the desktop session will fail auth — this is
-accepted, not a bug to fix with a plaintext token.
+Never run `gh auth setup-git` here; it writes the helper globally. The token
+needs the `workflow` scope (`gh auth refresh -h github.com -s workflow`)
+because pushes carry workflow files. The token lives in the desktop keyring,
+so headless runs fail authentication by design.
 
-## Installing
+## Commit authorship
 
-Install the GitHub-built binary package:
+Agents commit and rebase with `git -c commit.gpgsign=false` and add a
+co-author trailer naming the agent, on fixups and rewritten integration
+commits too. Merge commits on `next` stay plain. The repository `.rules`
+require the README review marker whenever an agent modifies source; Maciej
+removes it after review.
 
-```sh
-cd packaging/arch/zed-next-bin
-makepkg -Csi
-```
+## Scheduling
 
-Build and install from this checkout while reusing the local `target` directory:
-
-```sh
-script/package-zed-next-local
-```
-
-Package an already-built local bundle:
+No weekly schedule is live (decision pending). `packaging/systemd/user/`
+holds a user timer that runs a local Claude Code agent through this runbook
+every Friday evening inside the desktop session, where the keyring is
+available:
 
 ```sh
-script/package-zed-next-local --no-build
+systemctl --user link "$PWD/packaging/systemd/user/zed-fork-refresh.service"
+systemctl --user link "$PWD/packaging/systemd/user/zed-fork-refresh.timer"
+systemctl --user enable --now zed-fork-refresh.timer
 ```
 
-Clean source-build package:
-
-```sh
-cd packaging/arch/zed-next-git
-makepkg -Csi
-```
-
-## Local Build Notes
-
-`script/package-zed-next-local` temporarily writes `stable` to
-`crates/zed/RELEASE_CHANNEL`, builds the Linux bundle, restores the previous
-file contents, and packages the tarball through `makepkg`.
-
-The local and source-build packages add `-C target-cpu=native` by default. To
-disable that:
-
-```sh
-ZED_NEXT_TARGET_CPU= script/package-zed-next-local
-ZED_NEXT_TARGET_CPU= makepkg -Csi
-```
-
-All replacement builds set `ZED_UPDATE_EXPLANATION`, which disables upstream
-auto-update and points updates back to this fork/package flow.
-
-## Agent Checklist
-
-When asked to update this fork:
-
-1. Read this file, `NEXT_INTEGRATIONS.md`, and `UPSTREAM_WATCHLIST.md`.
-2. Fetch `upstream` and `origin`; snapshot the branch set to
-   `refs/backups/<date>/` and dry-run conflicts with `git merge-tree`.
-3. Rebase `next-base` on `upstream/main`, using unsigned agent commits with
-   the authoring agent's co-author trailer.
-4. Rebase custom patch branches (agents may do this unsigned; involve Maciej
-   only for product decisions).
-5. Rebase or rebuild the integration branches listed in
-   `NEXT_INTEGRATIONS.md`; verify `pr/*` snapshot tips against the upstream
-   PR head SHA before any import.
-6. Recreate `next` from `next-base` and assemble with the octopus merge.
-7. Gate: `cargo check --workspace` plus the manifest's per-integration tests.
-8. Update `NEXT_INTEGRATIONS.md` and `UPSTREAM_WATCHLIST.md` if the build set
-   or watched items changed.
-9. Validate package metadata with `makepkg --printsrcinfo` for packages touched.
-10. Do not push `next` until the intended set is complete; after pushing
-    `next-base`, run the workflow disable sweep; also push the `main` mirror.
+Manual runs: open a Claude Code session in this repository and ask for the
+refresh runbook.
