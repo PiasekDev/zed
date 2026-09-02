@@ -13,6 +13,7 @@ Remove an entry when its fork action is done.
 | Inline view-file button and previous/next file-history navigation | Missing upstream. Upstream has file history views (PRs 52634 and 56500 merged), a `file_filter` on `CommitView`, and a Git Graph view (`crates/git_ui/src/git_graph.rs`) | Retire `integration/git-ui-improvements` when both land; narrow it as pieces land |
 | Rust registered for Tailwind completions | Missing upstream | Retire `integration/28674-tailwind-rust-completion` |
 | Section-aware per-file solo diffs | Missing upstream. Grouping and section stats landed (PRs 59884, 60976, 60815); hunk operations moved onto `BufferDiff` (PR 63556, 2026-09) | Retire `integration/59884-group-by-staging` when upstream opens section-base diffs with the same stat semantics |
+| [PR 61067](https://github.com/zed-industries/zed/pull/61067) word diffs for unequal hunks (fixes issue 60859; PR 54039 is a smaller variant) | Open, last activity 2026-07-31 | Retire `integration/61067-word-diff-unequal-hunks` when either merges |
 
 ## Re-check each refresh
 

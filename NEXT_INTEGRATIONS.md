@@ -14,6 +14,7 @@ keep that shape. The gate commands per integration live in
 | `integration/git-ui-improvements` | `external/firatoezcan-main` by Firat Ozcan, rebuilt on current APIs | A view-file arrow button on git panel entries; previous and next commit navigation in single-file commit views, with `(commit, file)` tab identity | Both land upstream. Upstream already has file history views and a `file_filter` on `CommitView`; only the navigation and the per-file dedup remain fork-only |
 | `integration/28674-tailwind-rust-completion` | `pr/28674-tailwind-rust-completion`, upstream PR 28674 by `I-Info` (closed unmerged) | Tailwind completions inside Rust string and raw-string literals; Rust registered for the built-in Tailwind server | Upstream registers Rust for Tailwind completions |
 | `integration/59884-group-by-staging` | Fork tailoring on upstream's merged PR 59884; `pr/59884-group-by-staging` is the historical snapshot | Section-aware per-file diffs from the staging-grouped panel: staged rows open `HEAD -> index` read-only, unstaged rows open `index -> worktree`; combined footer totals with per-section fallback; remote updates for section-stat-only changes | Upstream opens per-file diffs against the section base with the same stat semantics |
+| `integration/61067-word-diff-unequal-hunks` | `pr/61067-word-diff-unequal-hunks`, upstream PR 61067 by `aetosdios27` (open) | Word-level diff highlights on hunks whose base and buffer line counts differ: lines are paired by similarity and word-diffed per pair, so an edited line next to an added or removed one keeps its intra-line highlight | The PR merges or upstream relaxes the equal-line-count gate in `buffer_diff` |
 
 Paired user settings live in Maciej's dotfiles, not in code:
 `git_panel.group_by: "staging"` and
@@ -50,6 +51,7 @@ Immutable source anchors. Never merge them into `next`.
 | `pr/55404-detachable-items` | `f7321ff6c3993eeec93d51a4953c3c9421600d24` | zed-industries/zed PR 55404 |
 | `pr/28674-tailwind-rust-completion` | `19a316e2b359c1bfaa2cff1af1c57581df76bd5d` (the feature commit; the branch tip later merged main) | zed-industries/zed PR 28674 |
 | `pr/59884-group-by-staging` | `035c1b6378f4f285167c0236b7b4621932e72b53` | zed-industries/zed PR 59884, merged upstream 2026-07-11 |
+| `pr/61067-word-diff-unequal-hunks` | `d829a6eb8e53a038a7af1a3adee278d2ca803a13` | zed-industries/zed PR 61067 |
 | `external/firatoezcan-main` | `bd20394908006e3d206257239df57530b32418e0` | firatoezcan/zed `main` |
 | `external/firatoezcan-git-ui-improvements` | `8ae6296bb0790506f53b3c2022429a9bb705b4d2` | firatoezcan/zed `autoresearch/git-ui-improvements-2026-04-04`, reference only |
 
