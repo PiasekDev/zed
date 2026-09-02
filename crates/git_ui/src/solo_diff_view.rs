@@ -1,6 +1,6 @@
 use crate::{
     git_panel::GitStatusEntry, git_panel_settings::GitPanelSettings, git_status_icon,
-    staged_diff::StagedDiffDelegate, unstaged_diff::UnstagedDiffDelegate,
+    staged_diff::StagedDiffHunkRenderer, unstaged_diff::UnstagedDiffHunkRenderer,
 };
 use anyhow::{Context as _, Result};
 use buffer_diff::DiffHunkSecondaryStatus;
@@ -227,11 +227,11 @@ impl SoloDiffView {
                 match diff_base {
                     DiffBase::Head => {}
                     DiffBase::Index => {
-                        editor.set_diff_hunk_delegate(Some(Arc::new(UnstagedDiffDelegate)), cx);
+                        editor.set_diff_hunk_renderer(Some(Arc::new(UnstagedDiffHunkRenderer)), cx);
                     }
                     DiffBase::Staged => {
                         editor.set_read_only(true);
-                        editor.set_diff_hunk_delegate(Some(Arc::new(StagedDiffDelegate)), cx);
+                        editor.set_diff_hunk_renderer(Some(Arc::new(StagedDiffHunkRenderer)), cx);
                     }
                     DiffBase::Merge { .. } => {}
                 }
