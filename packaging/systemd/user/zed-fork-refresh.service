@@ -1,0 +1,15 @@
+# Weekly refresh proposal for the Zed fork, run by a local Claude Code agent.
+# Runs inside the graphical user session so the gh token in the desktop
+# keyring is available; headless runs would fail authentication.
+# Install: see the Scheduling section of FORK_NEXT.md.
+[Unit]
+Description=Zed fork refresh proposal
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/contrib/zed
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin
+Environment=FORK_REFRESH_COAUTHOR=Claude Code <noreply@anthropic.com>
+ExecStart=%h/.local/bin/claude -p --dangerously-skip-permissions "Read FORK_NEXT.md and run the refresh runbook for today, from script/fork-refresh start through script/fork-refresh propose. Resolve conflicts yourself, fill in the Decisions section of the report from UPSTREAM_WATCHLIST.md, update the manifest and watchlist on the dated next-base when upstream changed what an integration needs. Do not promote and do not touch live branches."
+TimeoutStartSec=4h

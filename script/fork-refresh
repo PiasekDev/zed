@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+#
+# Mechanics of a fork refresh: dated proposal branches rebased on upstream,
+# assembled into a dated next, gated, reported, proposed as a PR.
+#
+# Judgment stays with the agent or human running it: conflict resolution,
+# obsolescence decisions, and the report's decision section. This script
+# stops and says what to do whenever judgment is needed. Read FORK_NEXT.md
+# for the runbook and NEXT_INTEGRATIONS.md for the build set this reads.
+
+set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Usage: script/fork-refresh <command> [--date YYYY-MM-DD] [--from <prefix>]
+
+Commands
+  start          Fetch, back up live branches, create refresh/<date>/* branches,
+                 rebase next-base on upstream/main and every build-set branch on
+                 the dated next-base. Idempotent: re-run after resolving a
+                 conflict or after committing to the dated next-base.
+  assemble       Recreate refresh/<date>/next from the dated next-base with one
+                 octopus merge of the build set.
+  gate           Run script/fork-refresh-gates on the dated next; log to
+                 target/fork-refresh/<date>/gates.log.
+  report         Write .github/refresh-report.md on the dated next from the
+                 branch state and the gate log. With --commit, commit it.
+  propose        Push the dated branches and open the proposal PR.
+  promote-local  Move the live local branches to the dated ones (no push).
+  sync           Fast-forward the live local branches to origin after a
+                 promotion done by the promote_refresh workflow.
+  clean          Delete refresh/<date>/* locally and on origin.
+
+Options
+  --date   Proposal date; defaults to today.
+  --from   Take the source branch set from a previous proposal prefix
+           (for example refresh/2026-08-21) instead of the live branches.
+  --commit With report: commit the report on the dated next.
+
+Environment
+  FORK_REFRESH_COAUTHOR  Co-author trailer for commits this script makes,
+                         for example "Claude Fable 5.1 <noreply@anthropic.com>".
+USAGE
+}
+
+command_name="${1:-}"
+[[ -n "$command_name" ]] || { usage >&2; exit 1; }
+shift
+
+date_tag="$(date +%F)"
+from_prefix=""
+commit_report=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --date) date_tag="$2"; shift 2 ;;
+    --from) from_prefix="${2%/}"; shift 2 ;;
+    --commit) commit_report=true; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+repo_dir="$(git rev-parse --show-toplevel)"
+cd "$repo_dir"
+
+prefix="refresh/${date_tag}"
+manifest="NEXT_INTEGRATIONS.md"
+report_path=".github/refresh-report.md"
+log_dir="target/fork-refresh/${date_tag}"
+fork_repo="PiasekDev/zed"
+
+git_unsigned() {
+  git -c commit.gpgsign=false "$@"
+}
+
+trailer_args() {
+  if [[ -n "${FORK_REFRESH_COAUTHOR:-}" ]]; then
+    printf -- '--trailer\nCo-Authored-By: %s\n' "$FORK_REFRESH_COAUTHOR"
+  fi
+}
+
+require_clean_worktree() {
+  if [[ -n "$(git status --porcelain)" ]]; then
+    echo "The working tree is not clean; commit or stash first." >&2
+    exit 1
+  fi
+}
+
+# The build set is the first column of the Build set table in the manifest:
+# one row per branch, the branch name in backticks.
+build_set() {
+  awk '/^## Build set/{on=1; next} /^## /{on=0} on && /^\| `/' "$manifest" \
+    | sed -E 's/^\| `([^`]+)`.*/\1/'
+}
+
+source_ref() {
+  if [[ -n "$from_prefix" ]]; then echo "${from_prefix}/$1"; else echo "$1"; fi
+}
+
+branch_exists() {
+  git show-ref --verify --quiet "refs/heads/$1"
+}
+
+stop_for_conflict() {
+  cat >&2 <<STOP
+
+Rebase of $1 stopped on a conflict.
+Resolve it (git status), then:
+  git add <files>
+  git -c commit.gpgsign=false rebase --continue
+  script/fork-refresh start --date ${date_tag}${from_prefix:+ --from ${from_prefix}}
+If you edited source to resolve it, add the README review marker required by
+.rules on this branch before continuing.
+STOP
+  exit 2
+}
+
+rebase_onto() {
+  # rebase_onto <branch> <new-base> [<old-base>]
+  local branch="$1" new_base="$2" old_base="${3:-}"
+  if git merge-base --is-ancestor "$new_base" "$branch"; then
+    echo "  $branch already sits on $new_base"
+    return
+  fi
+  git switch -q "$branch"
+  if [[ -n "$old_base" ]]; then
+    git_unsigned rebase -q --onto "$new_base" "$old_base" || stop_for_conflict "$branch"
+  else
+    git_unsigned rebase -q "$new_base" || stop_for_conflict "$branch"
+  fi
+  echo "  $branch rebased on $new_base"
+}
+
+cmd_start() {
+  require_clean_worktree
+  git fetch upstream --prune
+  git fetch origin --prune
+
+  echo "Backing up the live branch set to refs/backups/${date_tag}/"
+  for branch in next next-base $(build_set); do
+    if branch_exists "$branch"; then
+      git update-ref "refs/backups/${date_tag}/${branch//\//-}" "refs/heads/${branch}"
+    fi
+  done
+
+  local dated_base="${prefix}/next-base"
+  echo "Rebasing next-base on upstream/main"
+  if ! branch_exists "$dated_base"; then
+    git branch -q "$dated_base" "$(source_ref next-base)"
+  fi
+  rebase_onto "$dated_base" upstream/main
+
+  for branch in $(build_set); do
+    local dated="${prefix}/${branch}"
+    echo "Rebasing ${branch}"
+    if ! branch_exists "$dated"; then
+      git branch -q "$dated" "$(source_ref "$branch")"
+      rebase_onto "$dated" "$dated_base" "$(source_ref next-base)"
+    else
+      rebase_onto "$dated" "$dated_base"
+    fi
+  done
+
+  git switch -q "$dated_base"
+  echo "All proposal branches sit on ${dated_base}. Next: script/fork-refresh assemble --date ${date_tag}"
+}
+
+cmd_assemble() {
+  require_clean_worktree
+  local branches=()
+  for branch in $(build_set); do branches+=("${prefix}/${branch}"); done
+  git switch -q -C "${prefix}/next" "${prefix}/next-base"
+  if ! git_unsigned merge --no-ff -q "${branches[@]}" -m "Assemble next fork integrations"; then
+    git merge --abort || true
+    cat >&2 <<STOP
+The octopus merge conflicted. Two build-set branches touch the same lines; the
+octopus cannot resolve that. Fix the colliding branch, or merge the colliding
+pair sequentially with git merge --no-ff and keep the octopus for the rest.
+STOP
+    exit 2
+  fi
+  echo "Assembled ${prefix}/next at $(git rev-parse --short HEAD) with ${#branches[@]} integrations."
+}
+
+cmd_gate() {
+  require_clean_worktree
+  git switch -q "${prefix}/next"
+  mkdir -p "$log_dir"
+  echo "Gating ${prefix}/next; log: ${log_dir}/gates.log"
+  set +e
+  script/fork-refresh-gates 2>&1 | tee "${log_dir}/gates.log"
+  local status="${PIPESTATUS[0]}"
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    echo "Gates failed; the report will say so. Fix what you can before proposing." >&2
+  fi
+  return 0
+}
+
+cmd_report() {
+  git switch -q "${prefix}/next"
+  local source_base upstream_tip distance
+  source_base="$(git merge-base upstream/main "$(source_ref next-base)")"
+  upstream_tip="$(git rev-parse upstream/main)"
+  distance="$(git rev-list --count "${source_base}..${upstream_tip}")"
+  local base_sha
+  base_sha="$(git rev-parse "${prefix}/next-base")"
+
+  {
+    echo "# Refresh next from upstream ${date_tag}"
+    echo
+    echo "## Upstream range"
+    echo
+    echo "- Previous fork point: \`${source_base}\`"
+    echo "- Refreshed upstream tip: \`${upstream_tip}\`"
+    echo "- Upstream commits considered: ${distance}"
+    echo
+    echo "## Decisions"
+    echo
+    echo "<!-- Filled in by the person or agent running the refresh: watchlist state"
+    echo "changes, integrations obsoleted or narrowed, conflicts and how they were"
+    echo "resolved. Empty sections mean nothing changed. -->"
+    echo
+    echo "### Watchlist changes"
+    echo
+    echo "### Obsolescence"
+    echo
+    echo "### Conflicts resolved"
+    echo
+    echo "## Gates"
+    echo
+    if [[ -f "${log_dir}/gates.log" ]]; then
+      grep -E '^(PASS|FAIL): ' "${log_dir}/gates.log" | sed 's/^/- /'
+    else
+      echo "- Not run."
+    fi
+    echo
+    echo "## Proposal branches"
+    echo
+    echo "| Branch | Tip | Review compare |"
+    echo "| --- | --- | --- |"
+    echo "| \`${prefix}/next-base\` | \`$(git rev-parse --short "${prefix}/next-base")\` | [upstream/main...next-base](https://github.com/${fork_repo}/compare/${upstream_tip}...${base_sha}) |"
+    for branch in $(build_set); do
+      local tip
+      tip="$(git rev-parse "${prefix}/${branch}")"
+      echo "| \`${prefix}/${branch}\` | \`${tip:0:10}\` | [next-base...${branch}](https://github.com/${fork_repo}/compare/${base_sha}...${tip}) |"
+    done
+    echo "| \`${prefix}/next\` | \`$(git rev-parse --short HEAD)\` | assembled |"
+    echo
+    echo "The raw PR diff against the live next includes upstream churn; the compare"
+    echo "links above are the review artifact."
+  } > "$report_path"
+
+  if [[ "$commit_report" == true ]]; then
+    git add "$report_path"
+    local -a trailer
+    mapfile -t trailer < <(trailer_args)
+    git_unsigned commit -q -m "Record the ${date_tag} refresh proposal" "${trailer[@]}"
+    echo "Report committed on ${prefix}/next at $(git rev-parse --short HEAD)."
+  else
+    echo "Report written to ${report_path}. Fill in Decisions, then: script/fork-refresh report --date ${date_tag} --commit"
+  fi
+}
+
+cmd_propose() {
+  require_clean_worktree
+  git switch -q "${prefix}/next"
+  [[ -f "$report_path" ]] || { echo "Missing ${report_path}; run report --commit first." >&2; exit 1; }
+  for branch in next-base $(build_set) next; do
+    git push --force-with-lease origin "${prefix}/${branch}"
+  done
+  git push origin upstream/main:main
+  gh pr create --repo "$fork_repo" \
+    --base next --head "${prefix}/next" \
+    --title "Refresh next from upstream ${date_tag}" \
+    --label refresh-proposal \
+    --body-file "$report_path"
+  echo "Comment /promote on the PR to promote it (promote_refresh workflow)."
+}
+
+cmd_promote_local() {
+  require_clean_worktree
+  git switch -q --detach
+  for branch in next-base $(build_set) next; do
+    git branch -f "$branch" "${prefix}/${branch}"
+    echo "  $branch -> $(git rev-parse --short "$branch")"
+  done
+  git switch -q next
+  cat <<PUSH
+
+Live local branches moved. To publish (this triggers the zed_next build on next):
+  git push --force-with-lease origin next-base $(build_set | sed "s|^|'|; s|$|'|" | tr '\n' ' ')
+  git push --force-with-lease origin next
+  git push origin upstream/main:main
+Then run the workflow disable sweep from FORK_NEXT.md.
+PUSH
+}
+
+cmd_sync() {
+  require_clean_worktree
+  git fetch origin --prune
+  git switch -q --detach
+  for branch in next-base $(build_set) next; do
+    git branch -f "$branch" "origin/${branch}"
+    echo "  $branch -> $(git rev-parse --short "$branch")"
+  done
+  git switch -q next
+}
+
+cmd_clean() {
+  local refs
+  refs="$(git for-each-ref --format='%(refname:short)' "refs/heads/${prefix}/")"
+  [[ -n "$refs" ]] || { echo "No local ${prefix}/* branches."; }
+  for ref in $refs; do
+    git branch -q -D "$ref"
+    echo "  deleted $ref"
+  done
+  git ls-remote --heads origin "${prefix}/*" | awk '{print $2}' | sed 's|^refs/heads/||' | while read -r remote_ref; do
+    git push -q origin --delete "$remote_ref" && echo "  deleted origin/$remote_ref"
+  done
+}
+
+case "$command_name" in
+  start) cmd_start ;;
+  assemble) cmd_assemble ;;
+  gate) cmd_gate ;;
+  report) cmd_report ;;
+  propose) cmd_propose ;;
+  promote-local) cmd_promote_local ;;
+  sync) cmd_sync ;;
+  clean) cmd_clean ;;
+  *) usage >&2; exit 1 ;;
+esac

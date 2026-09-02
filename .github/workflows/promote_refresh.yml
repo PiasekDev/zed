@@ -1,15 +1,23 @@
 name: promote_refresh
 
-# Promotes an approved refresh proposal: when the repo owner approves a PR
-# labeled refresh-proposal, force-push `next` to the proposal head and start
-# the zed_next build. Promotion is pure git plumbing — no agent involved.
+# Promotes a refresh proposal when the repository owner comments `/promote`
+# on its pull request.
 #
-# The push uses GITHUB_TOKEN, whose pushes deliberately do not trigger other
-# workflows, so the build is dispatched explicitly afterwards.
+# Why a comment and not an approval: the proposal PR is opened by the owner
+# (or by a local agent using the owner's token), and GitHub forbids approving
+# your own PR. An earlier design had a workflow open the PR as
+# github-actions[bot]; that needs the repository setting "Allow GitHub Actions
+# to create and approve pull requests", which is off, and the workflow failed
+# silently for weeks. A comment trigger has no such dependency.
+#
+# Promotion is pure git plumbing: every refresh/<date>/<name> branch of the
+# proposal becomes the live <name> branch, `next` is force-pushed last, and
+# zed_next is dispatched explicitly because GITHUB_TOKEN pushes never trigger
+# other workflows.
 
 on:
-  pull_request_review:
-    types: [submitted]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
@@ -19,40 +27,80 @@ permissions:
 jobs:
   promote:
     if: >
-      github.event.review.state == 'approved' &&
-      github.event.review.user.login == github.repository_owner &&
-      github.event.pull_request.base.ref == 'next' &&
-      startsWith(github.event.pull_request.head.ref, 'refresh/') &&
-      contains(github.event.pull_request.labels.*.name, 'refresh-proposal')
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == github.repository_owner &&
+      startsWith(github.event.comment.body, '/promote')
     runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: Checkout
+      - name: Resolve the proposal
+        id: proposal
+        run: |
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json headRefName,headRefOid,baseRefName,state,labels \
+            --jq '"head=\(.headRefName)", "sha=\(.headRefOid)", "base=\(.baseRefName)", "state=\(.state)", "labeled=\(any(.labels[]; .name == "refresh-proposal"))"' \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Guard
+        env:
+          HEAD: ${{ steps.proposal.outputs.head }}
+          BASE: ${{ steps.proposal.outputs.base }}
+          STATE: ${{ steps.proposal.outputs.state }}
+          LABELED: ${{ steps.proposal.outputs.labeled }}
+        run: |
+          reason=""
+          [[ "$STATE" == "OPEN" ]] || reason="the PR is not open"
+          [[ "$BASE" == "next" ]] || reason="the PR base is $BASE, not next"
+          [[ "$HEAD" == refresh/*/next ]] || reason="the PR head $HEAD is not a refresh/<date>/next branch"
+          [[ "$LABELED" == "true" ]] || reason="the PR is not labeled refresh-proposal"
+          if [[ -n "$reason" ]]; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "Not promoted: $reason."
+            exit 1
+          fi
+
+      - name: Checkout the proposal head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ steps.proposal.outputs.sha }}
           fetch-depth: 0
 
-      - name: Force-push next to proposal head
-        run: |
-          git push --force origin "${{ github.event.pull_request.head.sha }}:refs/heads/next"
-
-      - name: Dispatch zed_next build
+      - name: Move the live branch set to the proposal
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD: ${{ steps.proposal.outputs.head }}
+          SHA: ${{ steps.proposal.outputs.sha }}
+        run: |
+          prefix="${HEAD%/next}"
+          git fetch origin "+refs/heads/${prefix}/*:refs/proposal/*"
+          git for-each-ref --format='%(refname)' refs/proposal/ | while read -r ref; do
+            name="${ref#refs/proposal/}"
+            [[ "$name" == "next" ]] && continue
+            echo "Moving $name to $(git rev-parse --short "$ref")"
+            git push --force origin "${ref}:refs/heads/${name}"
+          done
+          git push --force origin "${SHA}:refs/heads/next"
+
+      - name: Dispatch the zed_next build
         run: |
           gh workflow run zed_next.yml --repo "$GITHUB_REPOSITORY" --ref next
 
-      - name: Comment and clean up proposal branches
+      - name: Comment, wait for the merged state, delete proposal branches
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD: ${{ steps.proposal.outputs.head }}
+          SHA: ${{ steps.proposal.outputs.sha }}
         run: |
-          gh pr comment "${{ github.event.pull_request.number }}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "Promoted: \`next\` now points at ${{ github.event.pull_request.head.sha }}; zed_next build dispatched."
-          # The PR auto-closes as merged once next contains the head commits.
-          # Delete sibling proposal branches (refresh/<date>/*) for this proposal.
-          proposal_prefix="$(dirname "$HEAD_REF")"
-          for ref in $(git ls-remote --heads origin "${proposal_prefix}/*" | awk '{print $2}'); do
-            git push origin --delete "${ref#refs/heads/}" || true
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "Promoted: the live branch set now matches this proposal and \`next\` points at ${SHA}. The zed_next build was dispatched."
+          # GitHub marks the PR merged on its own once next contains the head
+          # commit; deleting the head branch before that would close it instead.
+          for _ in $(seq 1 12); do
+            state="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"
+            [[ "$state" == "MERGED" ]] && break
+            sleep 5
+          done
+          prefix="${HEAD%/next}"
+          git for-each-ref --format='%(refname)' refs/proposal/ | while read -r ref; do
+            git push origin --delete "${prefix}/${ref#refs/proposal/}" || true
           done

@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+#
+# Gate list for a refresh proposal. Run on the assembled dated next
+# (script/fork-refresh gate does this and keeps the log).
+#
+# One line per gate. When an integration gains or loses a focused test, edit
+# the line here; NEXT_INTEGRATIONS.md points at this file instead of
+# repeating the commands. Gates report, they do not stop the run: a failed
+# gate is a finding for the proposal report.
+#
+# cargo check --workspace is deliberately the first gate. Checking only the
+# crates an integration touches has let a release build fail on an untouched
+# crate before (settings_ui, 2026-06-30).
+
+set -uo pipefail
+
+failures=0
+
+gate() {
+  echo
+  echo "### $*"
+  if "$@"; then
+    echo "PASS: $*"
+  else
+    echo "FAIL: $*"
+    failures=$((failures + 1))
+  fi
+}
+
+gate cargo check --workspace
+gate cargo fmt --all -- --check
+
+# scroll-to-switch-tabs
+gate cargo test -p workspace scroll_wheel_over_tab_bar
+gate cargo test -p workspace horizontal_scroll_over_tab_bar
+gate cargo test -p workspace shift_inverts_scroll_wheel
+
+# integration/55404-detachable-items
+gate cargo test -p workspace test_handle_tab_drop_respects_is_pane_target
+gate cargo test -p workspace test_detach_active_item
+gate cargo test -p workspace test_reattach_active_item_to_source_window
+
+# integration/git-ui-improvements
+gate cargo test -p git_ui commit_view
+
+# integration/59884-group-by-staging
+gate cargo test -p git_ui group_by_staging
+gate cargo test -p project build_update
+
+echo
+if [[ "$failures" -eq 0 ]]; then
+  echo "All gates passed."
+else
+  echo "${failures} gate(s) failed."
+  exit 1
+fi
