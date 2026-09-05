@@ -12,8 +12,8 @@ is off until you turn it on.
 Point at the tab bar and scroll: the editor moves one tab per notch, the way
 VS Code does. Holding Shift goes the other way. It stops at the first and last
 tab instead of wrapping around, sideways scrolling still just slides the tab
-strip, and when pinned tabs are shown in their own row each row scrolls
-through its own tabs. Turn it on with `"tab_bar": { "scroll_to_switch_tabs":
+strip, and the whole bar reacts: the tabs, the empty space next to them, and
+the pinned row when pinned tabs sit in a row of their own. Turn it on with `"tab_bar": { "scroll_to_switch_tabs":
 true }`, or in the settings window under Window and Layout, Tab Bar, "Scroll
 To Switch Tabs". Importing VS Code settings picks it up from
 `workbench.editor.scrollToSwitchTabs`.
@@ -29,7 +29,8 @@ out of the window and drop it on the desktop. The new window opens maximized
 and holds the same live item, so a terminal keeps its shell and an editor
 keeps its undo history. To put it back, run "workspace: reattach active item
 to source window" in the detached window, or drag the tab back onto the pane
-it came from; a detached window that runs out of tabs closes itself. Useful on
+it came from; dragging the last tab out of a detached window closes that
+window. Useful on
 two monitors: a diff or a git graph on the second screen, the code on the
 first.
 
@@ -59,8 +60,10 @@ Branch: `integration/59884-group-by-staging`.
 Every changed file in the git panel, except deleted ones, carries a small
 arrow button on the right (visible in the screenshot above). Clicking it opens
 the file itself in the editor rather than a diff, which is the "git: view
-file" action; upstream keeps that action but only in the row's context menu.
-It is the fastest way to go from "this file changed" to editing it.
+file" action. Upstream has the action too, but only in the row's right-click
+menu or as the click behavior for every row
+(`"entry_primary_click_action": "view_file"`), so you cannot have diff-on-click
+and open-the-file at once. Here you can.
 
 Branch: `integration/git-ui-improvements`.
 
@@ -92,8 +95,9 @@ Branch: `integration/61067-word-diff-unequal-hunks`.
 ## Tailwind class completions inside Rust strings
 
 Writing HTML class lists in Rust, in a template macro or a plain string, gives
-the same Tailwind completions that JavaScript and Svelte files get, dashes and
-dots included so `text-sm` and `md:flex` complete as one item. It needs the
+the same Tailwind completions that JavaScript and Svelte files get; dashes
+and dots count as part of the word being completed, so `text-sm` and `p-1.5`
+arrive in one piece. It needs the
 Tailwind language server, which Zed installs for a project that has a Tailwind
 config.
 
