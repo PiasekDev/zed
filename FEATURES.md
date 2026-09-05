@@ -67,7 +67,8 @@ menu or as the click behavior for every row
 (`"entry_primary_click_action": "view_file"`), so you cannot have diff-on-click
 and open-the-file at once. Here you can.
 
-Branch: `integration/git-ui-improvements`.
+Branch: `file-history-navigation` (started from Firat Ozcan's branch, maintained
+here).
 
 ## Step through a file's history commit by commit
 
@@ -78,7 +79,8 @@ for this file". The arrows only appear when the commit view is scoped to one
 file. Each commit you step to opens in its own tab; stepping back to one you
 already visited reuses that tab instead of opening another.
 
-Branch: `integration/git-ui-improvements`.
+Branch: `file-history-navigation` (started from Firat Ozcan's branch, maintained
+here).
 
 ## Word-level highlights on hunks that changed length
 

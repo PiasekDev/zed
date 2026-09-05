@@ -49,7 +49,7 @@ integration is added, narrowed, or retired.
 | `upstream/main` | Upstream Zed. Fetch over HTTPS; the SSH push URL would prompt the hardware key | Upstream pushes |
 | `origin/main` | Mirror of `upstream/main` on the fork | Every proposal |
 | `next-base` | Fork infrastructure only. GitHub default branch, so its workflow files are the ones that run | Promotion |
-| `<feature>` (no prefix) | Personal patch branch rebased on `upstream/main`, for example `scroll-to-switch-tabs` | Promotion |
+| `<feature>` (no prefix) | Fork feature branch rebased on `upstream/main`: Maciej's own patches (`scroll-to-switch-tabs`) and features the fork maintains itself once their outside source is dead (`file-history-navigation`) | Promotion |
 | `pr/<number>-<name>`, `external/<owner>-<name>` | Raw upstream-PR or external-fork snapshot; never merged directly | Only to re-snapshot a moved source |
 | `integration/<number-or-owner>-<name>` | Adapted snapshot rebased on `next-base` | Promotion |
 | `refresh/<date>/<any of the above>` | Dated proposal copies | Deleted at promotion |

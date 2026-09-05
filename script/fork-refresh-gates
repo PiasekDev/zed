@@ -40,7 +40,7 @@ gate cargo test -p workspace test_handle_tab_drop_respects_is_pane_target
 gate cargo test -p workspace test_detach_active_item
 gate cargo test -p workspace test_reattach_active_item_to_source_window
 
-# integration/git-ui-improvements
+# file-history-navigation
 gate cargo test -p git_ui commit_view
 
 # integration/28674-tailwind-rust-completion: a grammar config entry and one
