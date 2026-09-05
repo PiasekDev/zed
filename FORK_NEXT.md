@@ -29,10 +29,15 @@ integration is added, narrowed, or retired.
 - **Upstream absorbs, the fork retires.** Every integration has a retirement
   condition in the manifest and a watchlist entry. Every refresh checks them
   and narrows or retires what upstream now carries.
-- **Agents do the mechanics, Maciej decides and pushes.** Agent commits are
-  unsigned with a co-author trailer. Decisions are collected up front; a run
-  does not stop to ask. Only product decisions and hardware-key actions wait
-  for Maciej.
+- **Agents do the mechanics and publish them; Maciej decides and tests.**
+  The agent running a refresh authors its commits and pushes the fork's
+  branches once the gates and a local build pass. Decisions are collected up
+  front; a run does not stop to ask. Only product decisions wait for Maciej.
+- **Every session refreshes, few sessions ship.** Any session that touches
+  the fork begins with the cheap half of the runbook (steps 1 and 3 plus
+  `cargo check --workspace`, roughly five minutes, ideally in a subagent that
+  reports conflicts back). The expensive half (gate, local build, package,
+  push) runs at ship points only: a feature landed, or Maciej asked.
 - **Everything gates on the whole workspace.** `cargo check --workspace`
   before anything is proposed; per-crate checks have let a release build fail
   on an untouched crate.
@@ -77,18 +82,13 @@ Run it from the repository root on a clean tree; `--date` defaults to today.
    `target/fork-refresh/<date>/`. A failed gate is a finding for the report,
    not a stop.
 5. `script/fork-refresh report` writes `.github/refresh-report.md`; fill in
-   its Decisions section, then `script/fork-refresh report --commit`. The
-   report becomes the PR body. Its compare links per branch are the review
-   artifact; the PR diff itself is mostly upstream churn.
-6. `script/fork-refresh propose` pushes the dated branches and the `main`
-   mirror, then opens the PR labeled `refresh-proposal` against `next`.
-7. Maciej reviews and comments `/promote` on the PR. The `promote_refresh`
-   workflow moves every live branch to its dated copy, force-pushes `next`
-   (the build starts), and deletes the dated branches. `script/fork-refresh
-   sync` then updates the local live branches. Without GitHub,
-   `script/fork-refresh promote-local` moves the local branches and prints
-   the push commands.
-8. After a promoted `next-base` reaches GitHub, disable upstream workflows
+   its Decisions section, then `script/fork-refresh report --commit`. Its
+   compare links per branch are the review artifact; the full diff against
+   the previous state is mostly upstream churn.
+6. `script/fork-refresh promote-local` moves the live local branches onto the
+   dated ones and prints the push commands; run them. Pushing `next` starts
+   the `zed_next` build. Fork branches only, never upstream.
+7. After the promoted `next-base` reaches GitHub, disable upstream workflows
    that arrived with the refresh. Upstream workflow files are kept so rebases
    stay quiet; unwanted ones are disabled, not deleted:
 
@@ -106,13 +106,9 @@ Adding or retiring an integration is described in the manifest.
 - `README.md` has `merge=ours` in `.gitattributes` (driver:
   `git config merge.ours.driver true`, set per clone), so upstream README
   churn never conflicts; wanted upstream README content is cherry-picked.
-- The proposal PR is opened with the owner's token, not by a workflow:
-  GitHub Actions may not create pull requests in this repository (a
-  repository setting), and the workflow that tried failed on its first run.
-  Promotion is a `/promote` comment rather than an approval because an author
-  cannot approve their own PR.
-- The promotion workflow dispatches `zed_next.yml` explicitly: pushes made
-  with `GITHUB_TOKEN` never trigger other workflows.
+- `script/fork-refresh propose` and `.github/workflows/promote_refresh.yml`
+  (a PR labeled `refresh-proposal`, promoted by a `/promote` comment) stay in
+  the tree for a future automated setup; nothing uses them today.
 - Before importing a `pr/*` snapshot, verify its tip against
   `gh pr view <number> -R zed-industries/zed --json headRefOid`. A stale
   `FETCH_HEAD` once produced a snapshot pointing at unrelated local work
@@ -130,13 +126,19 @@ the static remote server fail to link. `sccache` comes from
 `mozilla-actions/sccache-action`; do not set `SCCACHE_GHA_ENABLED` or
 `RUSTC_WRAPPER` before that action runs.
 
-Local alternatives live in `packaging/arch/` (`zed-next-local`,
-`zed-next-git`) and `script/package-zed-next-local`, which builds the current
-checkout as a stable-channel replacement (it temporarily writes `stable` to
-`crates/zed/RELEASE_CHANNEL`) and packages it with `makepkg`. Local builds
-add `-C target-cpu=native`; set `ZED_NEXT_TARGET_CPU=` to disable that. Every
-replacement build sets `ZED_UPDATE_EXPLANATION`, which turns upstream
-auto-update off.
+On Maciej's desktop the local package is what gets installed:
+`script/package-zed-next-local` builds the current checkout as a
+stable-channel replacement (it temporarily writes `stable` to
+`crates/zed/RELEASE_CHANNEL`) and packages it with `makepkg`, with
+`-C target-cpu=native` (set `ZED_NEXT_TARGET_CPU=` to disable). Agents run it
+with `--no-install` and report the package path; Maciej installs with
+`sudo pacman -U <path>`. `makepkg` rewrites `pkgver` in the PKGBUILD, so
+`git checkout -- packaging/arch/zed-next-local/PKGBUILD` afterwards. Other
+local variants live in `packaging/arch/` (`zed-next-local`, `zed-next-git`).
+Pushing `next` still matters even though the desktop builds its own: GitHub
+produces the portable package for other machines and the remote-server assets
+below. Every replacement build sets `ZED_UPDATE_EXPLANATION`, which turns
+upstream auto-update off.
 
 The fork owns Linux remote-server distribution: bootstrap resolves the remote
 server from the `zed-next` release instead of Zed's release service, because
@@ -163,16 +165,23 @@ so headless runs fail authentication by design.
 
 ## Commit authorship
 
-Agents commit and rebase with `git -c commit.gpgsign=false` and add a
-co-author trailer naming the agent, on fixups and rewritten integration
-commits too. Merge commits on `next` stay plain. The repository `.rules`
-require the README review marker whenever an agent modifies source; Maciej
-removes it after review.
+The agent doing the work is the author of what it commits: unsigned
+(`git -c commit.gpgsign=false -c user.name=... -c user.email=...`), no
+co-author trailer, and the same for rebases of Maciej's own patch branches
+such as `scroll-to-switch-tabs`. Keep `FORK_REFRESH_COAUTHOR` empty so the
+script adds no trailer either. Maciej signs only the commits he cares about
+personally. The repository `.rules` require the README review marker whenever
+an agent modifies source; Maciej removes it after review.
+
+`.claude/commands/refresh.md` is the runbook as a Claude Code `/refresh`
+command; agents that are not Claude Code run the instructions in that same
+file. `AGENTS.md` is upstream's symlink to `.rules` and is never edited here.
 
 ## Scheduling
 
-No weekly schedule is live (decision pending). `packaging/systemd/user/`
-holds a user timer that runs a local Claude Code agent through this runbook
+Refreshes are manual: this desktop is the only builder, so a refresh happens
+when a session touches the fork. `packaging/systemd/user/` keeps a user timer
+for later, which would run a local Claude Code agent through this runbook
 every Friday evening inside the desktop session, where the keyring is
 available:
 
@@ -182,5 +191,5 @@ systemctl --user link "$PWD/packaging/systemd/user/zed-fork-refresh.timer"
 systemctl --user enable --now zed-fork-refresh.timer
 ```
 
-Manual runs: open a Claude Code session in this repository and ask for the
-refresh runbook.
+Manual runs: open a Claude Code session in this repository and type
+`/refresh`.
