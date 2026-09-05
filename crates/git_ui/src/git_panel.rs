@@ -66,7 +66,8 @@ use project::git_store::GitAccess;
 use project::{
     Fs, Project, ProjectPath,
     git_store::{
-        CommitDataState, GitStoreEvent, Repository, RepositoryEvent, RepositoryId, pending_op,
+        CommitDataState, GitStoreEvent, Repository, RepositoryEvent, RepositoryId,
+        diff_buffer_list::DiffBase, pending_op,
     },
     project_settings::{GitPathStyle, ProjectSettings},
 };
@@ -2419,15 +2420,21 @@ impl GitPanel {
         cx: &mut Context<Self>,
     ) {
         maybe!({
-            let entry = self
-                .entries
-                .get(self.selected_entry?)?
-                .status_entry()?
-                .clone();
+            let selected_index = self.selected_entry?;
+            let entry = self.entries.get(selected_index)?.status_entry()?.clone();
             let repository = self.active_repository.clone()?;
+            let diff_base =
+                Self::diff_base_for_section(self.section_for_entry_index(selected_index));
 
-            SoloDiffView::open_or_focus(entry, repository, self.workspace.clone(), window, cx)
-                .detach_and_notify_err(self.workspace.clone(), window, cx);
+            SoloDiffView::open_or_focus_with_base(
+                entry,
+                repository,
+                self.workspace.clone(),
+                diff_base,
+                window,
+                cx,
+            )
+            .detach_and_notify_err(self.workspace.clone(), window, cx);
 
             Some(())
         });
@@ -5339,13 +5346,13 @@ impl GitPanel {
             } else if group_by_staging_state {
                 if staging.has_staged() {
                     staged_entries.push(GitStatusEntry {
-                        diff_stat: status_entry.staged_diff_stat,
+                        diff_stat: status_entry.staged_diff_stat.or(status_entry.diff_stat),
                         ..entry.clone()
                     });
                 }
                 if staging.has_unstaged() {
                     unstaged_entries.push(GitStatusEntry {
-                        diff_stat: status_entry.unstaged_diff_stat,
+                        diff_stat: status_entry.unstaged_diff_stat.or(status_entry.diff_stat),
                         ..entry
                     });
                 }
@@ -5710,6 +5717,13 @@ impl GitPanel {
         }
     }
 
+    fn diff_base_for_section(section: Option<Section>) -> DiffBase {
+        match Self::diff_target_for_section(section) {
+            DiffTarget::Staged => DiffBase::Staged,
+            DiffTarget::Unstaged => DiffBase::Index,
+            DiffTarget::Uncommitted => DiffBase::Head,
+        }
+    }
     fn update_counts(&mut self, repo: &Repository) {
         self.show_placeholders = false;
         self.conflicted_count = 0;
@@ -5719,20 +5733,18 @@ impl GitPanel {
         self.new_staged_count = 0;
         self.tracked_staged_count = 0;
         self.entry_count = 0;
-        self.diff_stat_total = DiffStat::default();
+        self.diff_stat_total = repo
+            .cached_status()
+            .filter_map(|entry| entry.diff_stat)
+            .fold(DiffStat::default(), |mut total, diff_stat| {
+                total.added = total.added.saturating_add(diff_stat.added);
+                total.deleted = total.deleted.saturating_add(diff_stat.deleted);
+                total
+            });
 
         let change_entries = self.change_entries_by_path().cloned().collect::<Vec<_>>();
         for status_entry in change_entries {
             self.entry_count += 1;
-            if let Some(diff_stat) = status_entry.diff_stat {
-                self.diff_stat_total.added =
-                    self.diff_stat_total.added.saturating_add(diff_stat.added);
-                self.diff_stat_total.deleted = self
-                    .diff_stat_total
-                    .deleted
-                    .saturating_add(diff_stat.deleted);
-            }
-
             let stage_status = GitPanel::stage_status_for_entry(&status_entry, repo);
 
             if repo.had_conflict_on_last_merge_head_change(&status_entry.repo_path) {
@@ -8361,6 +8373,36 @@ impl GitPanel {
                     ))
                 })
             })
+            .when(!is_deleted, |el| {
+                let open_file_id: ElementId = ElementId::Name(format!("open_file_{}", ix).into());
+                let open_file_button_id: ElementId =
+                    ElementId::Name(format!("open_file_button_{}", ix).into());
+                let this = cx.weak_entity();
+                el.child(
+                    div()
+                        .id(open_file_id)
+                        .flex_none()
+                        .occlude()
+                        .cursor_pointer()
+                        .child(
+                            IconButton::new(open_file_button_id, IconName::ArrowUpRight)
+                                .shape(ui::IconButtonShape::Square)
+                                .icon_size(IconSize::Small)
+                                .icon_color(Color::Muted)
+                                .tooltip(|_window, cx| {
+                                    Tooltip::for_action("View File", &ViewFile, cx)
+                                })
+                                .on_click(move |_, window, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.selected_entry = Some(ix);
+                                        this.view_file(&ViewFile, window, cx);
+                                        cx.stop_propagation();
+                                    })
+                                    .ok();
+                                }),
+                        ),
+                )
+            })
             .child(
                 div()
                     .id(checkbox_wrapper_id)
@@ -9696,6 +9738,7 @@ pub(crate) fn commit_title_exceeds_limit(title: &str, max_length: usize) -> bool
 #[cfg(test)]
 mod tests {
     use editor::SplittableEditor;
+    use editor::test::editor_test_context::assert_state_with_diff;
     use git::{
         repository::repo_path,
         status::{StatusCode, TrackedStatus, UnmergedStatus, UnmergedStatusCode},
@@ -9705,9 +9748,11 @@ mod tests {
     use project::FakeFs;
     use search::{BufferSearchBar, buffer_search::Deploy};
     use serde_json::json;
+    use settings::DiffViewStyle;
     use settings::SettingsStore;
     use std::any::TypeId;
     use theme::LoadThemes;
+    use unindent::Unindent as _;
     use util::path;
     use util::rel_path::rel_path;
 
@@ -10712,8 +10757,21 @@ mod tests {
         let panel = workspace.update_in(&mut cx, GitPanel::new);
         await_git_panel_entries(&panel, &mut cx).await;
 
-        let entries = panel.read_with(&mut cx, |panel, _| {
+        let entries = panel.read_with(&mut cx, |panel, cx| {
             assert_eq!(panel.entry_count, 6);
+            let expected_diff_stat_total = panel
+                .active_repository
+                .as_ref()
+                .expect("panel should have an active repository")
+                .read(cx)
+                .cached_status()
+                .filter_map(|entry| entry.diff_stat)
+                .fold(DiffStat::default(), |mut total, diff_stat| {
+                    total.added = total.added.saturating_add(diff_stat.added);
+                    total.deleted = total.deleted.saturating_add(diff_stat.deleted);
+                    total
+                });
+            assert_eq!(panel.diff_stat_total, expected_diff_stat_total);
             assert_eq!(
                 panel
                     .change_entries_by_path()
@@ -11478,6 +11536,246 @@ mod tests {
             assert_eq!(workspace.items_of_type::<UnstagedDiff>(cx).count(), 1);
             assert_eq!(workspace.items_of_type::<ProjectDiff>(cx).count(), 0);
         });
+    }
+
+    #[gpui::test]
+    async fn test_group_by_staging_solo_diff_hunk_toggle_does_not_duplicate(
+        cx: &mut TestAppContext,
+    ) {
+        init_test(cx);
+
+        let committed_contents = r#"
+            fn main() {
+                println!("hello world");
+            }
+
+            fn filler_1() {}
+            fn filler_2() {}
+            fn filler_3() {}
+            fn filler_4() {}
+            fn filler_5() {}
+            fn filler_6() {}
+            fn filler_7() {}
+            fn filler_8() {}
+
+            fn tail() {
+                println!("old tail");
+            }
+        "#
+        .unindent();
+        let staged_contents = committed_contents.replace("hello world", "goodbye world");
+        let worktree_contents = staged_contents.replace("old tail", "new tail");
+
+        let fs = FakeFs::new(cx.background_executor.clone());
+        fs.insert_tree(
+            path!("/project"),
+            json!({
+                ".git": {},
+                "src": {
+                    "main.rs": worktree_contents.clone(),
+                    "other.rs": worktree_contents.clone(),
+                }
+            }),
+        )
+        .await;
+        fs.set_head_for_repo(
+            Path::new(path!("/project/.git")),
+            &[
+                ("src/main.rs", committed_contents.clone()),
+                ("src/other.rs", committed_contents.clone()),
+            ],
+            "deadbeef",
+        );
+        fs.set_index_for_repo(
+            Path::new(path!("/project/.git")),
+            &[
+                ("src/main.rs", staged_contents.clone()),
+                ("src/other.rs", staged_contents.clone()),
+            ],
+        );
+        let repo = fs
+            .open_repo(path!("/project/.git").as_ref(), Some("git".as_ref()))
+            .unwrap();
+
+        let project = Project::test(fs.clone(), [Path::new(path!("/project"))], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window_handle
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .unwrap();
+        let mut cx = VisualTestContext::from_window(window_handle.into(), cx);
+
+        cx.update(|_window, cx| {
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.editor.diff_view_style = Some(DiffViewStyle::Unified);
+                    settings
+                        .git
+                        .get_or_insert_default()
+                        .file_diff
+                        .get_or_insert_default()
+                        .show_full_file = Some(false);
+                    let git_panel = settings.git_panel.get_or_insert_default();
+                    git_panel.group_by = Some(GitPanelGroupBy::Staging);
+                    git_panel.entry_primary_click_action = Some(GitPanelClickBehavior::FileDiff);
+                })
+            });
+        });
+
+        cx.read(|cx| {
+            project
+                .read(cx)
+                .worktrees(cx)
+                .next()
+                .unwrap()
+                .read(cx)
+                .as_local()
+                .unwrap()
+                .scan_complete()
+        })
+        .await;
+        cx.executor().run_until_parked();
+
+        let panel = workspace.update_in(&mut cx, GitPanel::new);
+        await_git_panel_entries(&panel, &mut cx).await;
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.selected_entry =
+                panel.entry_by_path_in_section(&repo_path("src/main.rs"), Section::Staged);
+            panel.open_selected_entry_on_click(false, window, cx);
+        });
+        cx.run_until_parked();
+
+        let staged_editor = workspace.read_with(&cx, |workspace, cx| {
+            workspace
+                .active_item(cx)
+                .unwrap()
+                .act_as::<Editor>(cx)
+                .unwrap()
+        });
+        assert_state_with_diff(
+            &staged_editor,
+            &mut cx,
+            "  fn main() {\n- ˇ    println!(\"hello world\");\n+     println!(\"goodbye world\");\n  }\n\n  fn filler_1() {}",
+        );
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.selected_entry =
+                panel.entry_by_path_in_section(&repo_path("src/other.rs"), Section::Unstaged);
+            panel.open_selected_entry_on_click(false, window, cx);
+        });
+        cx.run_until_parked();
+
+        let unstaged_editor = workspace.read_with(&cx, |workspace, cx| {
+            workspace
+                .active_item(cx)
+                .unwrap()
+                .act_as::<Editor>(cx)
+                .unwrap()
+        });
+        assert_state_with_diff(
+            &unstaged_editor,
+            &mut cx,
+            "\n  fn tail() {\n- ˇ    println!(\"old tail\");\n+     println!(\"new tail\");\n  }\n",
+        );
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.selected_entry =
+                panel.entry_by_path_in_section(&repo_path("src/main.rs"), Section::Staged);
+            panel.open_selected_entry_on_click(false, window, cx);
+        });
+        cx.run_until_parked();
+
+        let staged_editor = workspace.read_with(&cx, |workspace, cx| {
+            workspace
+                .active_item(cx)
+                .unwrap()
+                .act_as::<Editor>(cx)
+                .unwrap()
+        });
+
+        staged_editor.update_in(&mut cx, |editor, window, cx| {
+            let snapshot = editor.buffer().read(cx).snapshot(cx);
+            let hunks = editor
+                .diff_hunks_in_ranges(&[editor::Anchor::Min..editor::Anchor::Max], &snapshot)
+                .collect::<Vec<_>>();
+            assert_eq!(hunks.len(), 1);
+            editor.apply_stage_or_unstage(false, hunks, window, cx);
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            String::from_utf8(
+                repo.load_index_text(RepoPath::from_rel_path(rel_path("src/main.rs")))
+                    .await
+                    .unwrap()
+            )
+            .unwrap(),
+            committed_contents
+        );
+        assert_eq!(
+            String::from_utf8(fs.read_file_sync(path!("/project/src/main.rs")).unwrap()).unwrap(),
+            worktree_contents
+        );
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.selected_entry =
+                panel.entry_by_path_in_section(&repo_path("src/main.rs"), Section::Unstaged);
+            panel.open_selected_entry_on_click(false, window, cx);
+        });
+        cx.run_until_parked();
+
+        let unstaged_editor = workspace.read_with(&cx, |workspace, cx| {
+            workspace
+                .active_item(cx)
+                .unwrap()
+                .act_as::<Editor>(cx)
+                .unwrap()
+        });
+        unstaged_editor.update_in(&mut cx, |editor, window, cx| {
+            editor.change_selections(Default::default(), window, cx, |selections| {
+                selections.select_ranges([language::Point::new(1, 0)..language::Point::new(1, 0)]);
+            });
+            let ranges: Vec<_> = editor.selections.disjoint_anchor_ranges().collect();
+            let snapshot = editor.buffer().read(cx).snapshot(cx);
+            let hunks = editor.diff_hunks_in_ranges(&ranges, &snapshot).collect();
+            editor.apply_stage_or_unstage(true, hunks, window, cx);
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            String::from_utf8(
+                repo.load_index_text(RepoPath::from_rel_path(rel_path("src/main.rs")))
+                    .await
+                    .unwrap()
+            )
+            .unwrap(),
+            staged_contents
+        );
+        assert_eq!(
+            String::from_utf8(fs.read_file_sync(path!("/project/src/main.rs")).unwrap()).unwrap(),
+            worktree_contents
+        );
+
+        panel.update_in(&mut cx, |panel, window, cx| {
+            panel.selected_entry =
+                panel.entry_by_path_in_section(&repo_path("src/main.rs"), Section::Staged);
+            panel.open_selected_entry_on_click(false, window, cx);
+        });
+        cx.run_until_parked();
+
+        let staged_editor = workspace.read_with(&cx, |workspace, cx| {
+            workspace
+                .active_item(cx)
+                .unwrap()
+                .act_as::<Editor>(cx)
+                .unwrap()
+        });
+        assert_state_with_diff(
+            &staged_editor,
+            &mut cx,
+            "  fn main() {\n- ˇ    println!(\"hello world\");\n+     println!(\"goodbye world\");\n  }\n\n  fn filler_1() {}",
+        );
     }
 
     #[gpui::test]

@@ -6184,9 +6184,7 @@ impl RepositorySnapshot {
                             current_new_entry = new_statuses.next();
                         }
                         Ordering::Equal => {
-                            if new_entry.status != old_entry.status
-                                || new_entry.diff_stat != old_entry.diff_stat
-                            {
+                            if new_entry != old_entry {
                                 updated_statuses.push(new_entry.to_proto());
                             }
                             current_old_entry = old_statuses.next();
@@ -7215,6 +7213,56 @@ impl Repository {
                             .collect::<Result<Vec<_>>>()?,
                         is_shallow_boundary: response.is_shallow_boundary,
                     })
+                }
+            }
+        })
+    }
+
+    pub fn file_history_shas(
+        &mut self,
+        repo_path: RepoPath,
+        limit: Option<usize>,
+    ) -> oneshot::Receiver<Result<Vec<Oid>>> {
+        let repository_id = self.id;
+        self.send_job("file_history_shas", None, move |git_repo, _cx| async move {
+            match git_repo {
+                RepositoryState::Local(LocalRepositoryState { backend, .. }) => {
+                    let (sender, receiver) =
+                        async_channel::unbounded::<Vec<Arc<InitialGraphCommitData>>>();
+                    backend
+                        .initial_graph_data(LogSource::Path(repo_path), LogOrder::DateOrder, sender)
+                        .await?;
+
+                    let mut shas = Vec::new();
+                    while let Ok(commits) = receiver.try_recv() {
+                        for commit in commits {
+                            shas.push(commit.sha);
+                            if limit.is_some_and(|limit| shas.len() >= limit) {
+                                return Ok(shas);
+                            }
+                        }
+                    }
+                    Ok(shas)
+                }
+                RepositoryState::Remote(RemoteRepositoryState { project_id, client }) => {
+                    let mut responses = client
+                        .request_stream(proto::GetInitialGraphData {
+                            project_id: project_id.to_proto(),
+                            repository_id: repository_id.to_proto(),
+                            log_source: Some(log_source_to_proto(&LogSource::Path(repo_path))),
+                            log_order: log_order_to_proto(LogOrder::DateOrder),
+                        })
+                        .await?;
+                    let mut shas = Vec::new();
+                    while let Some(response) = responses.next().await {
+                        for commit in response?.commits {
+                            shas.push(initial_graph_commit_from_proto(commit)?.sha);
+                            if limit.is_some_and(|limit| shas.len() >= limit) {
+                                return Ok(shas);
+                            }
+                        }
+                    }
+                    Ok(shas)
                 }
             }
         })
@@ -11375,6 +11423,61 @@ mod tests {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
         });
+    }
+
+    #[test]
+    fn build_update_includes_section_diff_stat_changes() {
+        let status = FileStatus::Tracked(TrackedStatus {
+            index_status: StatusCode::Modified,
+            worktree_status: StatusCode::Modified,
+        });
+        let status_entry = |staged_diff_stat| StatusEntry {
+            repo_path: repo_path("src/main.rs"),
+            status,
+            diff_stat: Some(DiffStat {
+                added: 10,
+                deleted: 20,
+            }),
+            staged_diff_stat,
+            unstaged_diff_stat: Some(DiffStat {
+                added: 8,
+                deleted: 17,
+            }),
+        };
+        let snapshot = |entry| {
+            let mut snapshot = RepositorySnapshot::empty(
+                RepositoryId(1),
+                Arc::from(Path::new("/project")),
+                None,
+                None,
+                None,
+                PathStyle::local(),
+            );
+            snapshot.statuses_by_path = SumTree::from_iter([entry], ());
+            snapshot
+        };
+
+        let old = snapshot(status_entry(Some(DiffStat {
+            added: 2,
+            deleted: 3,
+        })));
+        let new = snapshot(status_entry(Some(DiffStat {
+            added: 3,
+            deleted: 3,
+        })));
+
+        let update = new.build_update(&old, 42);
+
+        assert_eq!(
+            update.updated_statuses,
+            vec![
+                status_entry(Some(DiffStat {
+                    added: 3,
+                    deleted: 3,
+                }))
+                .to_proto()
+            ]
+        );
     }
 
     type TestPasswordPrompt = (

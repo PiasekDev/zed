@@ -1434,6 +1434,9 @@
     // When enabled, pinned tabs appear in a top row and unpinned tabs in a bottom row.
     // When disabled, all tabs appear in a single row (default behavior).
     "show_pinned_tabs_in_separate_row": false,
+    // Whether or not to switch tabs when scrolling over the tab bar.
+    // Holding shift inverts this behavior.
+    "scroll_to_switch_tabs": false,
   },
   // Settings related to the editor's tabs
   "tabs": {

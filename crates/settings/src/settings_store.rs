@@ -2316,6 +2316,24 @@ mod tests {
             cx,
         );
 
+        check_vscode_import(
+            &mut store,
+            r#"{
+            }
+            "#
+            .unindent(),
+            r#"{ "workbench.editor.scrollToSwitchTabs": true }"#.to_owned(),
+            r#"{
+              "base_keymap": "VSCode",
+              "tab_bar": {
+                "scroll_to_switch_tabs": true
+              }
+            }
+            "#
+            .unindent(),
+            cx,
+        );
+
         // explorer sort settings
         check_vscode_import(
             &mut store,

@@ -1,7 +1,7 @@
 use crate::{
-    CloseWindow, NewCenterTerminal, NewFile, NewTerminal, OpenInTerminal, OpenOptions,
-    OpenTerminal, OpenVisible, SplitDirection, ToggleFileFinder, ToggleProjectSymbols, ToggleZoom,
-    Workspace, WorkspaceItemBuilder, ZoomIn, ZoomOut,
+    CloseWindow, DetachActiveItem, MultiWorkspace, NewCenterTerminal, NewFile, NewTerminal,
+    OpenInTerminal, OpenOptions, OpenTerminal, OpenVisible, SplitDirection, ToggleFileFinder,
+    ToggleProjectSymbols, ToggleZoom, Workspace, WorkspaceItemBuilder, ZoomIn, ZoomOut,
     focus_follows_mouse::FocusFollowsMouse as _,
     invalid_item_view::InvalidItemView,
     item::{
@@ -18,12 +18,13 @@ use anyhow::Result;
 use collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use futures::{StreamExt, stream::FuturesUnordered};
 use git::{CopyFilePermalink, OpenFilePermalink};
+use gpui::ScrollWheelEvent;
 use gpui::{
-    Action, Anchor, AnyElement, App, AsyncWindowContext, ClickEvent, ClipboardItem, Context, Div,
-    DragMoveEvent, Entity, EntityId, EventEmitter, ExternalPaths, FocusHandle, FocusOutEvent,
-    Focusable, KeyContext, MouseButton, NavigationDirection, Pixels, Point, PromptLevel, Render,
-    ScrollHandle, Subscription, Task, TaskExt, WeakEntity, WeakFocusHandle, Window, actions,
-    anchored, deferred, prelude::*,
+    Action, Anchor, AnyElement, App, AsyncWindowContext, Bounds, ClickEvent, ClipboardItem,
+    Context, Div, DragMoveEvent, Entity, EntityId, EventEmitter, ExternalPaths, FocusHandle,
+    FocusOutEvent, Focusable, KeyContext, MouseButton, MouseUpEvent, NavigationDirection, Pixels,
+    Point, PromptLevel, Render, ScrollHandle, Subscription, Task, TaskExt, WeakEntity,
+    WeakFocusHandle, Window, WindowHandle, WindowId, actions, anchored, deferred, prelude::*,
 };
 use itertools::Itertools;
 use language::{Capability, DiagnosticSeverity};
@@ -415,6 +416,7 @@ pub struct Pane {
     pub(crate) workspace: WeakEntity<Workspace>,
     project: WeakEntity<Project>,
     pub drag_split_direction: Option<SplitDirection>,
+    dragged_tab_outside_window: Option<DraggedTab>,
     can_drop_predicate: Option<Arc<dyn Fn(&dyn Any, &mut Window, &mut App) -> bool>>,
     can_split_predicate:
         Option<Arc<dyn Fn(&mut Self, &dyn Any, &mut Window, &mut Context<Self>) -> bool>>,
@@ -599,6 +601,7 @@ impl Pane {
             tab_bar_scroll_handle: ScrollHandle::new(),
             suppress_scroll: false,
             drag_split_direction: None,
+            dragged_tab_outside_window: None,
             workspace,
             project: project.downgrade(),
             can_drop_predicate,
@@ -1556,6 +1559,49 @@ impl Pane {
             index = 0;
         }
         self.activate_item(index, true, true, window, cx);
+    }
+
+    fn handle_tab_bar_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let should_switch_tabs =
+            TabBarSettings::get_global(cx).scroll_to_switch_tabs != event.modifiers.shift;
+
+        if !should_switch_tabs {
+            self.suppress_scroll = true;
+            return;
+        }
+
+        enum TabBarScrollDirection {
+            Previous,
+            Next,
+        }
+
+        let vertical_delta = event.delta.pixel_delta(window.line_height()).y;
+        let direction = match vertical_delta.cmp(&Pixels::ZERO) {
+            cmp::Ordering::Greater => TabBarScrollDirection::Previous,
+            cmp::Ordering::Less => TabBarScrollDirection::Next,
+            cmp::Ordering::Equal => return,
+        };
+
+        cx.stop_propagation();
+
+        match direction {
+            TabBarScrollDirection::Previous => {
+                if self.active_item_index > 0 {
+                    self.activate_item(self.active_item_index - 1, true, true, window, cx);
+                }
+            }
+            TabBarScrollDirection::Next => {
+                let next_index = self.active_item_index + 1;
+                if next_index < self.items.len() {
+                    self.activate_item(next_index, true, true, window, cx);
+                }
+            }
+        }
     }
 
     pub fn swap_item_left(
@@ -2918,6 +2964,7 @@ impl Pane {
                 ClosePosition::Right => ui::TabCloseSide::End,
             })
             .toggle_state(is_active)
+            .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
             .on_click(cx.listener({
                 let item_handle = item.boxed_clone();
                 move |pane: &mut Self, event: &ClickEvent, window, cx| {
@@ -3449,6 +3496,15 @@ impl Pane {
                         } else {
                             menu = menu.map(pin_tab_entries);
                         }
+
+                        menu = menu.separator().entry(
+                            "Detach Item",
+                            Some(DetachActiveItem.boxed_clone()),
+                            window.handler_for(&pane, move |pane, window, cx| {
+                                pane.activate_item(ix, true, true, window, cx);
+                                window.dispatch_action(DetachActiveItem.boxed_clone(), cx);
+                            }),
+                        );
                     };
 
                     // Add custom item-specific actions
@@ -3624,6 +3680,7 @@ impl Pane {
                 let is_scrollable = max_scroll > px(2.0);
                 let has_active_unpinned_tab = self.active_item_index >= self.pinned_tab_count;
                 h_flex()
+                    .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
                     .children(pinned_tabs)
                     .when(is_scrollable && is_scrolled, |this| {
                         this.when(has_active_unpinned_tab, |this| this.border_r_2())
@@ -3687,9 +3744,6 @@ impl Pane {
             .overflow_x_scroll()
             .w_full()
             .track_scroll(&self.tab_bar_scroll_handle)
-            .on_scroll_wheel(cx.listener(|this, _, _, _| {
-                this.suppress_scroll = true;
-            }))
             .children(unpinned_tabs)
             .child(self.render_tab_bar_drop_target(tab_count, cx))
     }
@@ -3704,6 +3758,7 @@ impl Pane {
             .min_w_6()
             .h(Tab::container_height(cx))
             .flex_grow_1()
+            .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
             // HACK: This empty child is currently necessary to force the drop target to appear
             // despite us setting a min width above.
             .child("")
@@ -3750,6 +3805,7 @@ impl Pane {
             .flex_grow_1()
             .border_l_1()
             .border_color(cx.theme().colors().border)
+            .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
             // HACK: This empty child is currently necessary to force the drop target to appear
             // despite us setting a min width above.
             .child("")
@@ -3858,6 +3914,175 @@ impl Pane {
         }
     }
 
+    fn track_tab_drag_for_detach(
+        &mut self,
+        event: &DragMoveEvent<DraggedTab>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let window_bounds = Bounds::new(Point::default(), window.viewport_size());
+        if window_bounds.contains(&event.event.position) {
+            self.dragged_tab_outside_window = None;
+        } else {
+            self.dragged_tab_outside_window = Some(event.drag(cx).clone());
+        }
+    }
+
+    fn detach_tab_dragged_out_of_window(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let window_bounds = Bounds::new(Point::default(), window.viewport_size());
+        if window_bounds.contains(&event.position) {
+            self.dragged_tab_outside_window = None;
+            return;
+        }
+
+        let Some(dragged_tab) = self.dragged_tab_outside_window.take() else {
+            return;
+        };
+
+        let screen_position = window.inner_window_bounds().get_bounds().origin + event.position;
+        if let Some(target_window) = Self::workspace_window_under_position(
+            screen_position,
+            window.window_handle().window_id(),
+            cx,
+        ) {
+            self.move_dragged_tab_to_workspace_window(&dragged_tab, target_window, window, cx);
+        } else {
+            self.reattach_or_detach_dragged_tab_without_target_window(&dragged_tab, window, cx);
+        }
+
+        cx.stop_active_drag(window);
+        cx.stop_propagation();
+    }
+
+    fn workspace_window_under_position(
+        screen_position: Point<Pixels>,
+        source_window_id: WindowId,
+        cx: &mut App,
+    ) -> Option<WindowHandle<MultiWorkspace>> {
+        let mut window_at_position = None;
+
+        for window_handle in cx.windows() {
+            if window_handle.window_id() == source_window_id {
+                continue;
+            }
+
+            let Some(window_handle) = window_handle.downcast::<MultiWorkspace>() else {
+                continue;
+            };
+
+            let Some((is_hovered, is_under_position)) = window_handle
+                .update(cx, |_, window, _| {
+                    (
+                        window.is_window_hovered(),
+                        window
+                            .inner_window_bounds()
+                            .get_bounds()
+                            .contains(&screen_position),
+                    )
+                })
+                .log_err()
+            else {
+                continue;
+            };
+
+            if is_hovered {
+                return Some(window_handle);
+            }
+
+            if is_under_position {
+                window_at_position = Some(window_handle);
+            }
+        }
+
+        window_at_position
+    }
+
+    fn move_dragged_tab_to_workspace_window(
+        &mut self,
+        dragged_tab: &DraggedTab,
+        target_window: WindowHandle<MultiWorkspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let from_pane = dragged_tab.pane.clone();
+        let from_workspace = if from_pane == cx.entity() {
+            self.workspace.clone()
+        } else {
+            from_pane.read(cx).workspace.clone()
+        };
+        let item_id = dragged_tab.item.item_id();
+
+        self.drag_split_direction = None;
+        self.workspace
+            .update(cx, |_, cx| {
+                cx.defer_in(window, move |_, _, cx| {
+                    let destination_workspace =
+                        match target_window.update(cx, |multi_workspace, window, cx| {
+                            let destination_workspace = multi_workspace.workspace().clone();
+                            let destination_pane =
+                                destination_workspace.read(cx).active_pane().clone();
+                            let destination_index = destination_pane.read(cx).items_len();
+                            move_item(
+                                &from_pane,
+                                &destination_pane,
+                                item_id,
+                                destination_index,
+                                true,
+                                window,
+                                cx,
+                            );
+                            destination_workspace.read(cx).weak_handle()
+                        }) {
+                            Ok(destination_workspace) => destination_workspace,
+                            Err(error) => {
+                                log::error!(
+                                    "failed to move dragged tab into target window: {error:#}"
+                                );
+                                return;
+                            }
+                        };
+
+                    Workspace::close_detached_window_if_empty(
+                        from_workspace,
+                        destination_workspace,
+                        cx,
+                    );
+                });
+            })
+            .log_err();
+    }
+
+    fn reattach_or_detach_dragged_tab_without_target_window(
+        &mut self,
+        dragged_tab: &DraggedTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let source_pane = dragged_tab.pane.clone();
+        let item_id = dragged_tab.item.item_id();
+
+        self.drag_split_direction = None;
+        self.workspace
+            .update(cx, |_, cx| {
+                cx.defer_in(window, move |workspace, window, cx| {
+                    if !workspace.reattach_item_to_source_window(
+                        source_pane.clone(),
+                        item_id,
+                        window,
+                        cx,
+                    ) {
+                        workspace.detach_item_from_pane(source_pane, item_id, window, cx);
+                    }
+                });
+            })
+            .log_err();
+    }
+
     pub fn handle_tab_drop(
         &mut self,
         dragged_tab: &DraggedTab,
@@ -3883,10 +4108,16 @@ impl Pane {
             || cfg!(not(target_os = "macos")) && window.modifiers().control;
 
         let from_pane = dragged_tab.pane.clone();
+        let from_workspace = if from_pane == cx.entity() {
+            self.workspace.clone()
+        } else {
+            from_pane.read(cx).workspace.clone()
+        };
 
         self.workspace
             .update(cx, |_, cx| {
                 cx.defer_in(window, move |workspace, window, cx| {
+                    let destination_workspace = workspace.weak_handle();
                     if let Some(split_direction) = split_direction {
                         to_pane = workspace.split_pane(to_pane, split_direction, window, cx);
                     }
@@ -3952,6 +4183,11 @@ impl Pane {
                             }
                         }
                     });
+                    Workspace::close_detached_window_if_empty(
+                        from_workspace,
+                        destination_workspace,
+                        cx,
+                    );
                 });
             })
             .log_err();
@@ -4435,6 +4671,11 @@ impl Render for Pane {
             .size_full()
             .flex_none()
             .overflow_hidden()
+            .on_drag_move::<DraggedTab>(cx.listener(Self::track_tab_drag_for_detach))
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(Self::detach_tab_dragged_out_of_window),
+            )
             .on_action(cx.listener(|pane, split: &SplitLeft, window, cx| {
                 pane.split(SplitDirection::Left, split.mode, window, cx)
             }))
@@ -5089,7 +5330,7 @@ mod tests {
     };
     use gpui::{
         AppContext, Axis, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-        TestAppContext, VisualTestContext, size,
+        ScrollDelta, TestAppContext, TouchPhase, VisualTestContext, point, size,
     };
     use project::FakeFs;
     use settings::SettingsStore;
@@ -8595,6 +8836,187 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn test_scroll_wheel_over_tab_bar_switches_tabs_when_enabled(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        set_scroll_to_switch_tabs(cx, true);
+
+        add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        add_labeled_item(&pane, "C", false, cx);
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+
+        let tab_c_bounds = cx.debug_bounds("TAB-2").expect("tab C should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_c_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B*", "C"], cx);
+
+        let tab_b_bounds = cx.debug_bounds("TAB-1").expect("tab B should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_b_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., -3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+    }
+
+    #[gpui::test]
+    async fn test_scroll_wheel_over_tab_bar_does_not_wrap(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        set_scroll_to_switch_tabs(cx, true);
+
+        add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        assert_item_labels(&pane, ["A", "B*"], cx);
+
+        let tab_b_bounds = cx.debug_bounds("TAB-1").expect("tab B should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_b_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., -3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B*"], cx);
+
+        pane.update_in(cx, |pane, window, cx| {
+            pane.activate_item(0, true, true, window, cx);
+        });
+        assert_item_labels(&pane, ["A*", "B"], cx);
+
+        let tab_a_bounds = cx.debug_bounds("TAB-0").expect("tab A should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_a_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A*", "B"], cx);
+    }
+
+    #[gpui::test]
+    async fn test_horizontal_scroll_over_tab_bar_does_not_switch_tabs(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        set_scroll_to_switch_tabs(cx, true);
+
+        add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        add_labeled_item(&pane, "C", false, cx);
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+
+        let tab_c_bounds = cx.debug_bounds("TAB-2").expect("tab C should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_c_bounds.center(),
+            delta: ScrollDelta::Lines(point(3., 0.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+    }
+
+    #[gpui::test]
+    async fn test_shift_inverts_scroll_wheel_tab_switching(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        add_labeled_item(&pane, "C", false, cx);
+        assert_item_labels(&pane, ["A", "B", "C*"], cx);
+
+        let tab_c_bounds = cx.debug_bounds("TAB-2").expect("tab C should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_c_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B*", "C"], cx);
+
+        set_scroll_to_switch_tabs(cx, true);
+
+        let tab_b_bounds = cx.debug_bounds("TAB-1").expect("tab B should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: tab_b_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A", "B*", "C"], cx);
+    }
+
+    #[gpui::test]
+    async fn test_scroll_wheel_over_separate_pinned_tab_row_switches_tabs(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+
+        set_scroll_to_switch_tabs(cx, true);
+        set_pinned_tabs_separate_row(cx, true);
+
+        let item_a = add_labeled_item(&pane, "A", false, cx);
+        add_labeled_item(&pane, "B", false, cx);
+        add_labeled_item(&pane, "C", false, cx);
+        pane.update_in(cx, |pane, window, cx| {
+            let index = pane
+                .index_for_item_id(item_a.item_id())
+                .expect("pinned item should be in pane");
+            pane.pin_tab_at(index, window, cx);
+        });
+        assert_item_labels(&pane, ["A!", "B", "C*"], cx);
+
+        let pinned_tab_bounds = cx
+            .debug_bounds("TAB-0")
+            .expect("pinned tab should be visible");
+        cx.simulate_event(ScrollWheelEvent {
+            position: pinned_tab_bounds.center(),
+            delta: ScrollDelta::Lines(point(0., 3.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        assert_item_labels(&pane, ["A!", "B*", "C"], cx);
+    }
+
+    #[gpui::test]
     async fn test_close_all_items_including_pinned(cx: &mut TestAppContext) {
         init_test(cx);
         let fs = FakeFs::new(cx.executor());
@@ -9070,6 +9492,17 @@ mod tests {
                     .tab_bar
                     .get_or_insert_default()
                     .show_pinned_tabs_in_separate_row = Some(enabled);
+            });
+        });
+    }
+
+    fn set_scroll_to_switch_tabs(cx: &mut TestAppContext, enabled: bool) {
+        cx.update_global(|store: &mut SettingsStore, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings
+                    .tab_bar
+                    .get_or_insert_default()
+                    .scroll_to_switch_tabs = Some(enabled);
             });
         });
     }

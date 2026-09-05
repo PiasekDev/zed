@@ -1,4 +1,7 @@
-use crate::{git_panel::GitStatusEntry, git_panel_settings::GitPanelSettings, git_status_icon};
+use crate::{
+    git_panel::GitStatusEntry, git_panel_settings::GitPanelSettings, git_status_icon,
+    staged_diff::StagedDiffHunkRenderer, unstaged_diff::UnstagedDiffHunkRenderer,
+};
 use anyhow::{Context as _, Result};
 use buffer_diff::DiffHunkSecondaryStatus;
 use editor::{
@@ -19,7 +22,10 @@ use language::{Anchor, Buffer, HighlightedText, OffsetRangeExt as _, Point};
 use multi_buffer::{MultiBuffer, PathKey, excerpt_context_lines};
 use project::{
     Project,
-    git_store::{Repository, RepositoryId},
+    git_store::{
+        Repository, RepositoryId,
+        diff_buffer_list::{DiffBase, LoadedDiffBuffer},
+    },
 };
 use settings::{Settings, SettingsStore, StatusStyle};
 use std::{
@@ -42,7 +48,9 @@ pub struct SoloDiffView {
     repository_id: RepositoryId,
     repo_path: RepoPath,
     buffer: Entity<Buffer>,
+    _main_buffer: Entity<Buffer>,
     diff: Entity<buffer_diff::BufferDiff>,
+    diff_base: DiffBase,
     editor: Entity<SplittableEditor>,
     workspace: WeakEntity<Workspace>,
     showing_full_file: bool,
@@ -57,6 +65,17 @@ impl SoloDiffView {
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<Entity<Self>>> {
+        Self::open_or_focus_with_base(entry, repository, workspace, DiffBase::Head, window, cx)
+    }
+
+    pub fn open_or_focus_with_base(
+        entry: GitStatusEntry,
+        repository: Entity<Repository>,
+        workspace: WeakEntity<Workspace>,
+        diff_base: DiffBase,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Task<Result<Entity<Self>>> {
         let Some(workspace_entity) = workspace.upgrade() else {
             return Task::ready(Err(anyhow::anyhow!("workspace was dropped")));
         };
@@ -64,7 +83,10 @@ impl SoloDiffView {
         let existing = workspace_entity
             .read(cx)
             .items_of_type::<SoloDiffView>(cx)
-            .find(|item| item.read(cx).matches(&repository, &entry.repo_path, cx));
+            .find(|item| {
+                item.read(cx)
+                    .matches(&repository, &entry.repo_path, &diff_base, cx)
+            });
         if let Some(existing) = existing {
             workspace_entity.update(cx, |workspace, cx| {
                 workspace.activate_item(&existing, true, true, window, cx);
@@ -86,15 +108,17 @@ impl SoloDiffView {
         let project = workspace_entity.read(cx).project().clone();
         let repo_path = entry.repo_path;
         window.spawn(cx, async move |cx| {
-            let buffer = project
+            let worktree_buffer = project
                 .update(cx, |project, cx| {
                     project.open_buffer(project_path.clone(), cx)
                 })
                 .await?;
-            let diff = project
-                .update(cx, |project, cx| {
-                    project.open_uncommitted_diff(buffer.clone(), cx)
-                })
+            let LoadedDiffBuffer {
+                display_buffer,
+                main_buffer,
+                diff,
+                ..
+            } = Self::open_diff_buffer(project.clone(), worktree_buffer, diff_base.clone(), cx)
                 .await?;
 
             workspace_entity.update_in(cx, |workspace, window, cx| {
@@ -104,8 +128,10 @@ impl SoloDiffView {
                         project,
                         repository,
                         repo_path,
-                        buffer,
+                        display_buffer,
+                        main_buffer,
                         diff,
+                        diff_base,
                         workspace_handle,
                         window,
                         cx,
@@ -118,12 +144,66 @@ impl SoloDiffView {
         })
     }
 
+    async fn open_diff_buffer(
+        project: Entity<Project>,
+        buffer: Entity<Buffer>,
+        diff_base: DiffBase,
+        cx: &mut gpui::AsyncApp,
+    ) -> Result<LoadedDiffBuffer> {
+        match diff_base {
+            DiffBase::Head => {
+                let diff = project
+                    .update(cx, |project, cx| {
+                        project.open_uncommitted_diff(buffer.clone(), cx)
+                    })
+                    .await?;
+                Ok(LoadedDiffBuffer {
+                    display_buffer: buffer.clone(),
+                    main_buffer: buffer,
+                    diff,
+                    conflict_set: None,
+                })
+            }
+            DiffBase::Index => {
+                let diff = project
+                    .update(cx, |project, cx| {
+                        project.open_unstaged_diff(buffer.clone(), cx)
+                    })
+                    .await?;
+                Ok(LoadedDiffBuffer {
+                    display_buffer: buffer.clone(),
+                    main_buffer: buffer,
+                    diff,
+                    conflict_set: None,
+                })
+            }
+            DiffBase::Staged => {
+                let (diff, index_buffer) = project
+                    .update(cx, |project, cx| {
+                        project.open_staged_diff(buffer.clone(), cx)
+                    })
+                    .await?;
+                Ok(LoadedDiffBuffer {
+                    display_buffer: index_buffer,
+                    main_buffer: buffer,
+                    diff,
+                    conflict_set: None,
+                })
+            }
+            DiffBase::Merge { .. } => Err(anyhow::anyhow!(
+                "merge-base solo diffs are not supported from the git panel"
+            )),
+        }
+    }
+
     fn new(
         project: Entity<Project>,
         repository: Entity<Repository>,
         repo_path: RepoPath,
         buffer: Entity<Buffer>,
+        main_buffer: Entity<Buffer>,
         diff: Entity<buffer_diff::BufferDiff>,
+        diff_base: DiffBase,
         workspace: Entity<Workspace>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -144,6 +224,17 @@ impl SoloDiffView {
             editor.rhs_editor().update(cx, |editor, cx| {
                 editor.set_should_serialize(false, cx);
                 editor.set_allow_git_diff_scrollbar_markers(showing_full_file, cx);
+                match diff_base {
+                    DiffBase::Head => {}
+                    DiffBase::Index => {
+                        editor.set_diff_hunk_renderer(Some(Arc::new(UnstagedDiffHunkRenderer)), cx);
+                    }
+                    DiffBase::Staged => {
+                        editor.set_read_only(true);
+                        editor.set_diff_hunk_renderer(Some(Arc::new(StagedDiffHunkRenderer)), cx);
+                    }
+                    DiffBase::Merge { .. } => {}
+                }
                 let snapshot = editor.snapshot(window, cx);
                 editor.go_to_hunk_before_or_after_position(
                     &snapshot,
@@ -177,7 +268,9 @@ impl SoloDiffView {
             repository_id,
             repo_path,
             buffer,
+            _main_buffer: main_buffer,
             diff,
+            diff_base,
             editor,
             workspace: workspace.downgrade(),
             showing_full_file,
@@ -261,8 +354,16 @@ impl SoloDiffView {
         cx.notify();
     }
 
-    fn matches(&self, repository: &Entity<Repository>, repo_path: &RepoPath, cx: &App) -> bool {
-        self.repository_id == repository.read(cx).id && &self.repo_path == repo_path
+    fn matches(
+        &self,
+        repository: &Entity<Repository>,
+        repo_path: &RepoPath,
+        diff_base: &DiffBase,
+        cx: &App,
+    ) -> bool {
+        self.repository_id == repository.read(cx).id
+            && &self.repo_path == repo_path
+            && &self.diff_base == diff_base
     }
 
     fn button_states(&self, cx: &App) -> SoloDiffButtonStates {

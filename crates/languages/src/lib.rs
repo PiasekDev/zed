@@ -280,6 +280,7 @@ pub fn init(languages: Arc<LanguageRegistry>, fs: Arc<dyn Fs>, node: NodeRuntime
         "JavaScript",
         "TypeScript",
         "PHP",
+        "Rust",
         "Svelte",
         "TSX",
         "Vue.js",

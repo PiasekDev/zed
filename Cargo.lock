@@ -2446,6 +2446,7 @@ dependencies = [
  "rand 0.9.4",
  "rope",
  "settings",
+ "strsim",
  "sum_tree",
  "text",
  "tracing",

@@ -550,6 +550,10 @@ pub struct TabBarSettingsContent {
     ///
     /// Default: false
     pub show_pinned_tabs_in_separate_row: Option<bool>,
+    /// Whether or not to switch tabs when scrolling over the tab bar.
+    ///
+    /// Default: false
+    pub scroll_to_switch_tabs: Option<bool>,
 }
 
 #[with_fallible_options]
