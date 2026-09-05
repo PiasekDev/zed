@@ -29,9 +29,10 @@ upstream behavior plus the fork's intent.
    range, what changed per integration, gate results, the build result, and
    the `sudo pacman -U <absolute path to the .pkg.tar.zst>` install command.
 7. Publish: `script/fork-refresh promote-local`, then the push commands it
-   prints, then the workflow disable sweep from `FORK_NEXT.md`. Push the
-   fork's branches only, never upstream, and only after the gates and the
-   local build passed.
+   prints, then the workflow disable sweep from `FORK_NEXT.md`, then
+   `script/fork-refresh clean` to drop the dated branches. Push the fork's
+   branches only, never upstream, and only after the gates and the local
+   build passed.
 
 Commits are yours: unsigned, authored by you, no co-author trailer. Fork
 work never adds the README review marker (`.rules`, "Fork workflow"); never

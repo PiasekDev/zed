@@ -43,6 +43,9 @@ gate cargo test -p workspace test_reattach_active_item_to_source_window
 # integration/git-ui-improvements
 gate cargo test -p git_ui commit_view
 
+# integration/28674-tailwind-rust-completion: a grammar config entry and one
+# registration line, no focused test; cargo check --workspace covers it.
+
 # integration/61067-word-diff-unequal-hunks
 gate cargo test -p buffer_diff
 gate cargo test -p multi_buffer word_diff

@@ -88,8 +88,15 @@ require_clean_worktree() {
 
 # The build set is the first column of the Build set table in the manifest:
 # one row per branch, the branch name in backticks.
+# The manifest is read from the proposal's next-base, not the worktree: the
+# checked-out branch may be an older live branch whose manifest predates the
+# build-set table, and an empty build set would silently promote only
+# next-base and next.
 build_set() {
-  awk '/^## Build set/{on=1; next} /^## /{on=0} on && /^\| `/' "$manifest" \
+  local ref="${prefix}/next-base"
+  git show-ref --verify --quiet "refs/heads/${ref}" || ref="next-base"
+  git show "${ref}:${manifest}" \
+    | awk '/^## Build set/{on=1; next} /^## /{on=0} on && /^\| `/' \
     | sed -E 's/^\| `([^`]+)`.*/\1/'
 }
 
@@ -225,7 +232,7 @@ cmd_report() {
   if [[ -f "$report_path" ]]; then
     local existing
     existing="$(awk '/^## Decisions$/{capture=1; next} /^## Gates$/{capture=0} capture' "$report_path" | sed '/./,$!d')"
-    if printf '%s\n' "$existing" | sed '/^<!--/,/-->$/d' | grep -qE '^[^[:space:]#]'; then
+    if printf '%s\n' "$existing" | sed '/^<!--/,/-->$/d' | grep -qE '^[[:space:]]*[^[:space:]#]'; then
       decisions="$existing"
     fi
   fi
@@ -259,7 +266,8 @@ cmd_report() {
     echo "## Gates"
     echo
     if [[ -f "${log_dir}/gates.log" ]]; then
-      grep -E '^(PASS|FAIL): ' "${log_dir}/gates.log" | sed 's/^/- /'
+      grep -E '^(PASS|FAIL): ' "${log_dir}/gates.log" | sed 's/^/- /' \
+        || echo "- No gate results in ${log_dir}/gates.log."
     else
       echo "- Not run."
     fi
@@ -337,6 +345,9 @@ cmd_sync() {
 }
 
 cmd_clean() {
+  if [[ "$(git branch --show-current)" == "${prefix}/"* ]]; then
+    git switch -q next
+  fi
   local refs
   refs="$(git for-each-ref --format='%(refname:short)' "refs/heads/${prefix}/")"
   [[ -n "$refs" ]] || { echo "No local ${prefix}/* branches."; }

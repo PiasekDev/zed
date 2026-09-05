@@ -98,6 +98,9 @@ Run it from the repository root on a clean tree; `--date` defaults to today.
      grep -v -e zed_next -e promote_refresh |
      xargs -r -n1 basename | xargs -r -n1 gh workflow disable --repo PiasekDev/zed
    ```
+8. `script/fork-refresh clean` deletes the dated branches, locally and on
+   `origin`; the live branches now carry their content and
+   `refs/backups/<date>/*` keeps the pre-refresh state.
 
 Adding or retiring an integration is described in the manifest.
 
@@ -165,7 +168,9 @@ so headless runs fail authentication by design.
 
 ## Commit authorship
 
-The agent doing the work is the author of what it commits: unsigned
+From 2026-09-05 on, the agent doing the work is the author of what it
+commits (earlier fork commits carry Maciej as author with a co-author
+trailer): unsigned
 (`git -c commit.gpgsign=false -c user.name=... -c user.email=...`), no
 co-author trailer, and the same for rebases of Maciej's own patch branches
 such as `scroll-to-switch-tabs`. Keep `FORK_REFRESH_COAUTHOR` empty so the

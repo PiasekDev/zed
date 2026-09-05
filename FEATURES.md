@@ -9,13 +9,15 @@ is off until you turn it on.
 
 ## Scroll over the tab bar to switch tabs
 
-Point at the tab bar and scroll: the editor moves one tab per notch, the way
-VS Code does. Holding Shift goes the other way. It stops at the first and last
-tab instead of wrapping around, sideways scrolling still just slides the tab
-strip, and the whole bar reacts: the tabs, the empty space next to them, and
-the pinned row when pinned tabs sit in a row of their own. Turn it on with `"tab_bar": { "scroll_to_switch_tabs":
-true }`, or in the settings window under Window and Layout, Tab Bar, "Scroll
-To Switch Tabs". Importing VS Code settings picks it up from
+Point at the tab bar and scroll: the editor moves one tab per wheel notch,
+the way VS Code does (a trackpad swipe counts every step, so a long swipe
+walks several tabs). Holding Shift gives the plain tab-strip scroll instead,
+and with the setting off, Shift-scrolling switches tabs. It stops at the
+first and last tab instead of wrapping around, sideways scrolling still just
+slides the tab strip, and the whole bar reacts: the tabs, the empty space next
+to them, and the pinned row when pinned tabs sit in a row of their own. Turn
+it on with `"tab_bar": { "scroll_to_switch_tabs": true }`, or in the settings
+window under Window & Layout, Tab Bar, "Scroll To Switch Tabs". Importing VS Code settings picks it up from
 `workbench.editor.scrollToSwitchTabs`.
 
 Branch: `scroll-to-switch-tabs`.
@@ -73,8 +75,8 @@ Open a commit from a file's history and the commit view grows two arrows in
 its header: left for the previous commit that touched this file, right for
 the next one. Tooltips say "Previous commit for this file" and "Next commit
 for this file". The arrows only appear when the commit view is scoped to one
-file, and each (commit, file) pair reuses its own tab, so walking a file's
-history back and forth does not leave a trail of tabs behind.
+file. Each commit you step to opens in its own tab; stepping back to one you
+already visited reuses that tab instead of opening another.
 
 Branch: `integration/git-ui-improvements`.
 
@@ -84,7 +86,8 @@ Zed already highlights the changed words inside a modified line, but only when
 a hunk has the same number of lines on both sides. In this build a hunk where
 lines were added or removed alongside an edit still gets that highlight: the
 lines are paired by how similar they are, the pairs are word-diffed, and lines
-with no good match stay plain whole-line additions or deletions. In the
+with no good match stay plain whole-line additions or deletions. Hunks with
+more than five lines on either side keep the plain whole-line coloring. In the
 screenshot the edited line keeps its inner "brave new" highlight while the
 line added above it stays a plain addition.
 

@@ -15,7 +15,7 @@ issue tracker, use:
 `next` is the daily-driver build, assembled from `next-base` (fork
 infrastructure) and the integration branches listed in
 [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md). The maintenance workflow,
-including the weekly refresh, is in [FORK_NEXT.md](./FORK_NEXT.md).
+including the refresh, is in [FORK_NEXT.md](./FORK_NEXT.md).
 [FEATURES.md](./FEATURES.md) describes in plain terms what this build does
 that upstream Zed does not.
 
