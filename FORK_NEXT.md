@@ -7,7 +7,9 @@ this file is written for them as much as for Maciej.
 
 Read this file, then [NEXT_INTEGRATIONS.md](./NEXT_INTEGRATIONS.md) (the build
 set) and [UPSTREAM_WATCHLIST.md](./UPSTREAM_WATCHLIST.md) (what upstream may
-absorb), before touching any branch.
+absorb), before touching any branch. [FEATURES.md](./FEATURES.md) says what
+the build set means for someone using the editor; keep it in step when an
+integration is added, narrowed, or retired.
 
 ## Principles
 
