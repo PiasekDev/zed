@@ -219,6 +219,17 @@ cmd_report() {
   local base_sha
   base_sha="$(git rev-parse "${prefix}/next-base")"
 
+  # A filled Decisions section is the run's judgment; regenerating the report
+  # must not throw it away.
+  local decisions=""
+  if [[ -f "$report_path" ]]; then
+    local existing
+    existing="$(awk '/^## Decisions$/{capture=1; next} /^## Gates$/{capture=0} capture' "$report_path" | sed '/./,$!d')"
+    if printf '%s\n' "$existing" | sed '/^<!--/,/-->$/d' | grep -qE '^[^[:space:]#]'; then
+      decisions="$existing"
+    fi
+  fi
+
   {
     echo "# Refresh next from upstream ${date_tag}"
     echo
@@ -230,16 +241,21 @@ cmd_report() {
     echo
     echo "## Decisions"
     echo
-    echo "<!-- Filled in by the person or agent running the refresh: watchlist state"
-    echo "changes, integrations obsoleted or narrowed, conflicts and how they were"
-    echo "resolved. Empty sections mean nothing changed. -->"
-    echo
-    echo "### Watchlist changes"
-    echo
-    echo "### Obsolescence"
-    echo
-    echo "### Conflicts resolved"
-    echo
+    if [[ -n "$decisions" ]]; then
+      printf '%s\n' "$decisions"
+      echo
+    else
+      echo "<!-- Filled in by the person or agent running the refresh: watchlist state"
+      echo "changes, integrations obsoleted or narrowed, conflicts and how they were"
+      echo "resolved. Empty sections mean nothing changed. -->"
+      echo
+      echo "### Watchlist changes"
+      echo
+      echo "### Obsolescence"
+      echo
+      echo "### Conflicts resolved"
+      echo
+    fi
     echo "## Gates"
     echo
     if [[ -f "${log_dir}/gates.log" ]]; then
