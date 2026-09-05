@@ -33,5 +33,6 @@ upstream behavior plus the fork's intent.
    fork's branches only, never upstream, and only after the gates and the
    local build passed.
 
-Commits are yours: unsigned, authored by you, no co-author trailer. Never
-remove the review marker at the top of `README.md`.
+Commits are yours: unsigned, authored by you, no co-author trailer. Fork
+work never adds the README review marker (`.rules`, "Fork workflow"); never
+remove one that is present.

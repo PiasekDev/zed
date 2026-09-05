@@ -187,3 +187,13 @@ Rules emerge from validated patterns, not one-off observations. The workflow is:
 1. Agent notes a pattern during a session.
 2. Team validates the pattern in code review.
 3. A dedicated commit adds the rule with context on *why* it exists.
+
+## Fork workflow
+
+This repository is also the personal fork described in `FORK_NEXT.md`. The
+README review-marker rule above exists for pull requests to
+zed-industries/zed. Work that stays in the fork (commits on `next-base`,
+`integration/*`, `pr/*`, personal patch branches, and the assembled `next`)
+does not add the marker. Changes meant to become an upstream pull request
+still add it, and agents still never remove a marker that is present: the
+fork owner does that himself.

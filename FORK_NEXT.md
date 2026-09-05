@@ -170,8 +170,9 @@ The agent doing the work is the author of what it commits: unsigned
 co-author trailer, and the same for rebases of Maciej's own patch branches
 such as `scroll-to-switch-tabs`. Keep `FORK_REFRESH_COAUTHOR` empty so the
 script adds no trailer either. Maciej signs only the commits he cares about
-personally. The repository `.rules` require the README review marker whenever
-an agent modifies source; Maciej removes it after review.
+personally. The README review marker required by `.rules` applies only to
+changes headed for an upstream pull request; fork-only work never adds it (see
+the "Fork workflow" section of `.rules`), and only Maciej removes one.
 
 `.claude/commands/refresh.md` is the runbook as a Claude Code `/refresh`
 command; agents that are not Claude Code run the instructions in that same
